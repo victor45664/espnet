@@ -182,6 +182,62 @@ class ESPnetASRModel(AbsESPnetModel):
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
 
+
+    def forward_ilm(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Frontend + Encoder + Decoder + Calc loss
+
+        Args:
+            speech: (Batch, Length, ...) not nessesary it is only used to get device of tensor
+            speech_lengths: (Batch, )   not nessesary it is only used to get device of tensor
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        """
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+            text.shape[0]
+            == text_lengths.shape[0]
+        ), (text.shape, text_lengths.shape)
+        batch_size = text.shape[0]
+
+        # for data-parallel
+        text = text[:, : text_lengths.max()]
+
+        encoder_out=
+        # 1. Forward decoder
+        decoder_out, _ = self.decoder(
+            encoder_out, -1, ys_in_pad, ys_in_lens
+        )
+
+        # 2. Compute attention loss
+        loss_att = self.criterion_att(decoder_out, ys_out_pad)
+        acc_att = th_accuracy(
+            decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+
+        stats = dict(
+            loss=loss.detach(),
+            loss_att=loss_att.detach() if loss_att is not None else None,
+            loss_ctc=loss_ctc.detach() if loss_ctc is not None else None,
+            acc=acc_att,
+            cer=cer_att,
+            wer=wer_att,
+            cer_ctc=cer_ctc,
+        )
+
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
+        return loss, stats, weight
+
+
     def collect_feats(
         self,
         speech: torch.Tensor,

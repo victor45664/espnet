@@ -103,6 +103,7 @@ class RNNDecoder(AbsDecoder):
 
         super().__init__()
         eprojs = encoder_output_size
+        self.encoder_output_size = eprojs
         self.dtype = rnn_type
         self.dunits = hidden_size
         self.dlayers = num_layers
@@ -146,6 +147,21 @@ class RNNDecoder(AbsDecoder):
         self.att_list = build_attention_list(
             eprojs=eprojs, dunits=hidden_size, **att_conf
         )
+
+    def init_ilme(self,args):
+        #这个函数需要在__init__之后调用
+        self.decoder_parameter = list(self.parameters())
+
+        #ilme
+        if args["ilmetype"]=="nacl":
+            from espnet2.asr.ilme.ilmenet import NACL
+            self.ilme=NACL(self.encoder_output_size)
+        elif args["ilmetype"]=="acl":
+            from espnet2.asr.ilme.ilmenet import ACL
+            self.ilme=ACL(self.dunits,args["acllayers"],args["aclactivations"],self.encoder_output_size)
+
+        self.ilme_parameter = list(self.ilme.parameters())
+
 
     def zero_state(self, hs_pad):
         return hs_pad.new_zeros(hs_pad.size(0), self.dunits)
@@ -248,6 +264,76 @@ class RNNDecoder(AbsDecoder):
             make_pad_mask(ys_in_lens, z_all, 1),
             0,
         )
+        return z_all, ys_in_lens
+
+
+    def forward_ilm(self, hs_pad, hlens, ys_in_pad, ys_in_lens, strm_idx=0):
+        # hs_pad 是假的 encoder output
+        if self.num_encs == 1:
+            hs_pad = [hs_pad]
+
+
+        # attention index for the attention module
+        # in SPA (speaker parallel attention),
+        # att_idx is used to select attention module. In other cases, it is 0.
+        att_idx = min(strm_idx, len(self.att_list) - 1)
+
+
+        # get dim, length info
+        olength = ys_in_pad.size(1)
+
+        # initialization
+        c_list = [self.zero_state(hs_pad[0])]
+        z_list = [self.zero_state(hs_pad[0])]
+        for _ in range(1, self.dlayers):
+            c_list.append(self.zero_state(hs_pad[0]))
+            z_list.append(self.zero_state(hs_pad[0]))
+        z_all = []
+        if self.num_encs == 1:
+            att_w = None
+            self.att_list[att_idx].reset()  # reset pre-computation of h
+        else:
+            att_w_list = [None] * (self.num_encs + 1)  # atts + han
+            att_c_list = [None] * self.num_encs  # atts
+            for idx in range(self.num_encs + 1):
+                # reset pre-computation of h in atts and han
+                self.att_list[idx].reset()
+
+        # pre-computation of embedding
+        eys = self.dropout_emb(self.embed(ys_in_pad))  # utt x olen x zdim
+
+        # loop for an output sequence
+        for i in range(olength):
+            if self.num_encs == 1:
+                att_c = self.ilme(self.dropout_dec[0](z_list[0]), eys[:, i, :])  #ilme 核心
+            else:
+                assert False, "currently ilme only support model with one encoder i.e. one attention"
+
+            if i > 0 and random.random() < self.sampling_probability:
+                z_out = self.output(z_all[-1])
+                z_out = np.argmax(z_out.detach().cpu(), axis=1)
+                z_out = self.dropout_emb(self.embed(to_device(self, z_out)))
+                ey = torch.cat((z_out, att_c), dim=1)  # utt x (zdim + hdim)
+            else:
+                # utt x (zdim + hdim)
+                ey = torch.cat((eys[:, i, :], att_c), dim=1)
+            z_list, c_list = self.rnn_forward(ey, z_list, c_list, z_list, c_list)
+            if self.context_residual:
+                z_all.append(
+                    torch.cat((self.dropout_dec[-1](z_list[-1]), att_c), dim=-1)
+                )  # utt x (zdim + hdim)
+            else:
+                z_all.append(self.dropout_dec[-1](z_list[-1]))  # utt x (zdim)
+
+        z_all = torch.stack(z_all, dim=1)
+        z_all = self.output(z_all)
+        z_all.masked_fill_(
+            make_pad_mask(ys_in_lens, z_all, 1),
+            0,
+        )
+
+
+
         return z_all, ys_in_lens
 
     def init_state(self, x):

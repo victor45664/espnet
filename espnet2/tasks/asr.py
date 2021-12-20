@@ -477,3 +477,24 @@ class ASRTask(AbsTask):
 
         assert check_return_type(model)
         return model
+
+
+class ASRTask_ilme(ASRTask):
+    @classmethod
+    def add_task_arguments(cls, parser: argparse.ArgumentParser):
+        super().add_task_arguments(parser)
+        group = parser.add_argument_group(description="ilme related")
+        group.add_argument(
+            f"--ilme_conf",
+            action=NestedDictAction,
+            default=dict(),
+            help=f"The keyword arguments for ilme",
+        )
+
+
+
+    @classmethod
+    def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
+         model=super().build_model(args)
+         model.decoder.init_ilme(args.ilme_conf)
+         return model

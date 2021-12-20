@@ -17,3 +17,5 @@ class AbsDecoder(torch.nn.Module, ScorerInterface, ABC):
         ys_in_lens: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         raise NotImplementedError
+
+
