@@ -209,33 +209,33 @@ class ESPnetASRModel(AbsESPnetModel):
         # for data-parallel
         text = text[:, : text_lengths.max()]
 
-        encoder_out=
+        ys_in_pad, ys_out_pad = add_sos_eos(text, self.sos, self.eos, self.ignore_id)
+        ys_in_lens = text_lengths + 1
+
+        fake_encoder_out=speech.new_zeros(batch_size,1,self.encoder._output_size)
         # 1. Forward decoder
-        decoder_out, _ = self.decoder(
-            encoder_out, -1, ys_in_pad, ys_in_lens
+        decoder_out, _ = self.decoder.forward_ilm(
+            fake_encoder_out, -1, ys_in_pad, ys_in_lens
         )
 
-        # 2. Compute attention loss
-        loss_att = self.criterion_att(decoder_out, ys_out_pad)
-        acc_att = th_accuracy(
+        # 2. Compute ilm loss
+        loss_ilm = self.criterion_att(decoder_out, ys_out_pad)
+        ilm_acc = th_accuracy(
             decoder_out.view(-1, self.vocab_size),
             ys_out_pad,
             ignore_label=self.ignore_id,
         )
 
+        ilm_ppl = torch.exp(loss_ilm)
         stats = dict(
-            loss=loss.detach(),
-            loss_att=loss_att.detach() if loss_att is not None else None,
-            loss_ctc=loss_ctc.detach() if loss_ctc is not None else None,
-            acc=acc_att,
-            cer=cer_att,
-            wer=wer_att,
-            cer_ctc=cer_ctc,
+            ilm_loss=loss_ilm.detach(),
+            ilm_acc=ilm_acc,
+            ilm_ppl=ilm_ppl.detach()
         )
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
-        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
-        return loss, stats, weight
+        loss, stats, weight = force_gatherable((loss_ilm, stats, batch_size), loss_ilm.device)
+        return loss_ilm, stats, weight
 
 
     def collect_feats(

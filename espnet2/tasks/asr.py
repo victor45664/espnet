@@ -63,7 +63,7 @@ from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import CommonPreprocessor
-from espnet2.train.trainer import Trainer
+from espnet2.train.trainer import Trainer,Trainer_ilme
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import float_or_none
@@ -493,8 +493,29 @@ class ASRTask_ilme(ASRTask):
 
 
 
+    trainer = Trainer_ilme
     @classmethod
     def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
          model=super().build_model(args)
          model.decoder.init_ilme(args.ilme_conf)
          return model
+
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        class fakemodel(object):
+            #假模型，用于替换parameters
+            def __init__(self,para):
+                self.para=para
+            def parameters(self):
+                return self.para
+
+
+        mymodel=fakemodel(model.decoder.ilme_parameter)  #一个只含有parameters的假model，用于指定更新哪些参数
+        optimizers = super().build_optimizers(args,mymodel)
+
+        return optimizers
+

@@ -12,10 +12,10 @@ import torch
 class MultiSequential(torch.nn.Sequential):
     """Multi-input multi-output torch.nn.Sequential."""
 
-    def forward(self, *args):
+    def forward(self, *args, **kwargs):
         """Repeat."""
         for m in self:
-            args = m(*args)
+            args = m(*args, **kwargs)
         return args
 
 

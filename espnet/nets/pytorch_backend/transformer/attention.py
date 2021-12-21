@@ -30,6 +30,7 @@ class MultiHeadedAttention(nn.Module):
         # We assume d_v always equals d_k
         self.d_k = n_feat // n_head
         self.h = n_head
+        self.n_feat=n_feat
         self.linear_q = nn.Linear(n_feat, n_feat)
         self.linear_k = nn.Linear(n_feat, n_feat)
         self.linear_v = nn.Linear(n_feat, n_feat)
@@ -113,6 +114,36 @@ class MultiHeadedAttention(nn.Module):
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         return self.forward_attention(v, scores, mask)
 
+    def init_ilme(self,args):
+        #ilme
+        if args["ilmetype"]=="nacl":
+            from espnet2.asr.ilme.ilmenet import NACL
+            self.ilme=NACL(self.encoder_output_size)
+        elif args["ilmetype"]=="acl":
+            from espnet2.asr.ilme.ilmenet import ACL
+            self.ilme=ACL(self.n_feat,args["acllayers"],args["aclactivations"],self.n_feat)
+
+        self.ilme_parameter = list(self.ilme.parameters())
+
+    def forward_ilm(self, query):
+        """Compute scaled dot product attention.
+
+        Args:
+            query (torch.Tensor): Query tensor (#batch, time1, size).
+            key (torch.Tensor): Key tensor (#batch, time2, size).
+            value (torch.Tensor): Value tensor (#batch, time2, size).
+            mask (torch.Tensor): Mask tensor (#batch, 1, time2) or
+                (#batch, time1, time2).
+
+        Returns:
+            torch.Tensor: Output tensor (#batch, time1, d_model).
+
+        """
+
+        q = self.linear_q(query)
+
+        ctx=self.ilme(q,-1)   #transformer ilme doesn't support mini lstm
+        return self.linear_out(ctx)
 
 class LegacyRelPositionMultiHeadedAttention(MultiHeadedAttention):
     """Multi-Head Attention layer with relative position encoding (old version).

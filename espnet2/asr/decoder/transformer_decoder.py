@@ -141,6 +141,64 @@ class BaseTransformerDecoder(AbsDecoder, BatchScorerInterface):
         olens = tgt_mask.sum(1)
         return x, olens
 
+    def forward_ilm(
+            self,
+            hs_pad: torch.Tensor,
+            hlens: torch.Tensor,
+            ys_in_pad: torch.Tensor,
+            ys_in_lens: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Forward decoder.
+
+        Args:
+            hs_pad: encoded memory, float32  (batch, maxlen_in, feat)
+            hlens: (batch)
+            ys_in_pad:
+                input token ids, int64 (batch, maxlen_out)
+                if input_layer == "embed"
+                input tensor (batch, maxlen_out, #mels) in the other cases
+            ys_in_lens: (batch)
+        Returns:
+            (tuple): tuple containing:
+
+            x: decoded token score before softmax (batch, maxlen_out, token)
+                if use_output_layer is True,
+            olens: (batch, )
+        """
+        tgt = ys_in_pad
+        # tgt_mask: (B, 1, L)
+        tgt_mask = (~make_pad_mask(ys_in_lens)[:, None, :]).to(tgt.device)
+        # m: (1, L, L)
+        m = subsequent_mask(tgt_mask.size(-1), device=tgt_mask.device).unsqueeze(0)
+        # tgt_mask: (B, L, L)
+        tgt_mask = tgt_mask & m
+
+
+
+        x = self.embed(tgt)
+        x, tgt_mask, _, _ = self.decoders(x, tgt_mask, -1, -1,ilm=True)
+        if self.normalize_before:
+            x = self.after_norm(x)
+        if self.output_layer is not None:
+            x = self.output_layer(x)
+
+        olens = tgt_mask.sum(1)
+        return x, olens
+
+    def init_ilme(self,args):
+        #这个函数需要在__init__之后调用
+        self.decoder_parameter = list(self.parameters())
+
+
+        decoder_layers=list(self.decoders)
+        self.ilme_parameter=[]
+        for layer in decoder_layers:
+            layer.init_ilme(args)
+            self.ilme_parameter = self.ilme_parameter+layer.ilme_parameter
+
+
+
+
     def forward_one_step(
         self,
         tgt: torch.Tensor,
