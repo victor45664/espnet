@@ -188,13 +188,20 @@ class BaseTransformerDecoder(AbsDecoder, BatchScorerInterface):
     def init_ilme(self,args):
         #这个函数需要在__init__之后调用
         self.decoder_parameter = list(self.parameters())
+        decoder_layers = list(self.decoders)
+        if "tsf_share" in args and args["tsf_share"]==True:
+            decoder_layers[0].init_ilme(args)
+            self.ilme_parameter = decoder_layers[0].ilme_parameter
+            for layer in decoder_layers[1:]:
+                layer.src_attn.ilme=decoder_layers[0].src_attn.ilme
+                
 
+        else:
 
-        decoder_layers=list(self.decoders)
-        self.ilme_parameter=[]
-        for layer in decoder_layers:
-            layer.init_ilme(args)
-            self.ilme_parameter = self.ilme_parameter+layer.ilme_parameter
+            self.ilme_parameter=[]
+            for layer in decoder_layers:
+                layer.init_ilme(args)
+                self.ilme_parameter = self.ilme_parameter+layer.ilme_parameter
 
 
 
@@ -278,6 +285,86 @@ class BaseTransformerDecoder(AbsDecoder, BatchScorerInterface):
         # batch decoding
         ys_mask = subsequent_mask(ys.size(-1), device=xs.device).unsqueeze(0)
         logp, states = self.forward_one_step(ys, ys_mask, xs, cache=batch_state)
+
+        # transpose state of [layer, batch] into [batch, layer]
+        state_list = [[states[i][b] for i in range(n_layers)] for b in range(n_batch)]
+        return logp, state_list
+
+
+
+
+    def forward_one_step_ilm(
+        self,
+        tgt: torch.Tensor,
+        tgt_mask: torch.Tensor,
+        memory: torch.Tensor,
+        cache: List[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """Forward one step.
+
+        Args:
+            tgt: input token ids, int64 (batch, maxlen_out)
+            tgt_mask: input token mask,  (batch, maxlen_out)
+                      dtype=torch.uint8 in PyTorch 1.2-
+                      dtype=torch.bool in PyTorch 1.2+ (include 1.2)
+            memory: encoded memory, float32  (batch, maxlen_in, feat)
+            cache: cached output list of (batch, max_time_out-1, size)
+        Returns:
+            y, cache: NN output value and cache per `self.decoders`.
+            y.shape` is (batch, maxlen_out, token)
+        """
+        x = self.embed(tgt)
+        if cache is None:
+            cache = [None] * len(self.decoders)
+        new_cache = []
+        for c, decoder in zip(cache, self.decoders):
+            x, tgt_mask, _, memory_mask = decoder.forward_ilm(
+                x, tgt_mask, -1, None, cache=c
+            )
+            new_cache.append(x)
+
+        if self.normalize_before:
+            y = self.after_norm(x[:, -1])
+        else:
+            y = x[:, -1]
+        if self.output_layer is not None:
+            y = torch.log_softmax(self.output_layer(y), dim=-1)
+
+        return y, new_cache
+
+
+    def batch_score_ilm(
+        self, ys: torch.Tensor, states: List[Any], xs: torch.Tensor
+    ) -> Tuple[torch.Tensor, List[Any]]:
+        """Score new token batch.
+
+        Args:
+            ys (torch.Tensor): torch.int64 prefix tokens (n_batch, ylen).
+            states (List[Any]): Scorer states for prefix tokens.
+            xs (torch.Tensor):
+                The encoder feature that generates ys (n_batch, xlen, n_feat).
+
+        Returns:
+            tuple[torch.Tensor, List[Any]]: Tuple of
+                batchfied scores for next token with shape of `(n_batch, n_vocab)`
+                and next state list for ys.
+
+        """
+        # merge states
+        n_batch = len(ys)
+        n_layers = len(self.decoders)
+        if states[0] is None:
+            batch_state = None
+        else:
+            # transpose state of [batch, layer] into [layer, batch]
+            batch_state = [
+                torch.stack([states[b][i] for b in range(n_batch)])
+                for i in range(n_layers)
+            ]
+
+        # batch decoding
+        ys_mask = subsequent_mask(ys.size(-1), device=xs.device).unsqueeze(0)
+        logp, states = self.forward_one_step_ilm(ys, ys_mask, xs, cache=batch_state)
 
         # transpose state of [layer, batch] into [batch, layer]
         state_list = [[states[i][b] for i in range(n_layers)] for b in range(n_batch)]

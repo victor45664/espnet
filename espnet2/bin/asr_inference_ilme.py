@@ -36,6 +36,12 @@ from espnet2.utils.types import str2bool
 from espnet2.utils.types import str2triple_str
 from espnet2.utils.types import str_or_none
 
+class IlmScorer(BatchScorerInterface):
+    def __init__(self,decoder):
+        self.decoder=decoder
+    def batch_score(self,*argv,**kwargs):
+        return self.decoder.batch_score_ilm(*argv,**kwargs)
+
 
 class Speech2Text:
     """Speech2Text class
@@ -67,6 +73,7 @@ class Speech2Text:
         beam_size: int = 20,
         ctc_weight: float = 0.5,
         lm_weight: float = 1.0,
+        ilm_weight:float=-1.0,
         ngram_weight: float = 0.9,
         penalty: float = 0.0,
         nbest: int = 1,
@@ -84,11 +91,18 @@ class Speech2Text:
         decoder = asr_model.decoder
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
+        #ilme scorer
+        ilm_scorer=IlmScorer(decoder)
         scorers.update(
             decoder=decoder,
+            ilm=ilm_scorer,
             ctc=ctc,
             length_bonus=LengthBonus(len(token_list)),
         )
+
+
+
+
 
         # 2. Build Language model
         if lm_train_config is not None:
@@ -115,6 +129,7 @@ class Speech2Text:
         weights = dict(
             decoder=1.0 - ctc_weight,
             ctc=ctc_weight,
+            ilm=ilm_weight,
             lm=lm_weight,
             ngram=ngram_weight,
             length_bonus=penalty,
