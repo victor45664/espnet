@@ -35,6 +35,45 @@ from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool
 from espnet2.utils.types import str2triple_str
 from espnet2.utils.types import str_or_none
+from itertools import product
+
+class GridsearchWeights(object):
+    def __init__(self,weights):
+        list_weight=dict()
+        for key in weights:
+            assert len(str(weights[key]))!=0,"please assign "+key
+            list_weight[key]=self.str2list(str(weights[key]))
+        combinations=list(product(*list(list_weight.values())))
+        self.weights=[]
+        for i in range(len(combinations)):
+            weight=dict()
+            c=0
+            str_param=""
+            for key in weights:
+                weight[key]=combinations[i][c]
+                c+=1
+                str_param+=key+"_"+str(weight[key])+"_"
+            weight["str_param"]=str_param[:-1]   #当前参数组合的文本表示
+            weight["decoder"] = 1.0 - weight["ctc"]   #decoder输出的权重
+            weight["ilm"] = weight["decoder"]*weight["ilm"]  #ilm 的权重是相对于attention分数的权重
+            self.weights.append(weight)
+
+    def __len__(self):
+        return len(self.weights)
+    def __getitem__(self,item):
+        return self.weights[item]
+
+    def str2list(self,instr):
+        out=[]
+        temp=instr.split(",")
+        for i in range(len(temp)):
+            try:
+                out.append(float(temp[i]))
+            except TypeError:
+                logging.error("Format wrong ",instr)
+                raise
+        return out
+
 
 class IlmScorer(BatchScorerInterface):
     def __init__(self,decoder):
@@ -71,9 +110,9 @@ class Speech2Text:
         batch_size: int = 1,
         dtype: str = "float32",
         beam_size: int = 20,
-        ctc_weight: float = 0.5,
-        lm_weight: float = 1.0,
-        ilm_weight:float=-1.0,
+        ctc_weight: str = "",
+        lm_weight: str = "",
+        ilm_weight:str = "",   #注意，这里的ilm_weight是和(1-ctc_weight)的比值
         ngram_weight: float = 0.9,
         penalty: float = 0.0,
         nbest: int = 1,
@@ -126,17 +165,28 @@ class Speech2Text:
         scorers["ngram"] = ngram
 
         # 4. Build BeamSearch object
-        weights = dict(
-            decoder=1.0 - ctc_weight,
+        # weights = dict(
+        #     decoder=1.0 - ctc_weight,
+        #     ctc=ctc_weight,
+        #     ilm=ilm_weight,
+        #     lm=lm_weight,
+        #     ngram=ngram_weight,
+        #     length_bonus=penalty,
+        # )
+
+
+        self.gridsearchweights=GridsearchWeights(dict(
             ctc=ctc_weight,
             ilm=ilm_weight,
             lm=lm_weight,
             ngram=ngram_weight,
             length_bonus=penalty,
-        )
+        ))
+
+
         beam_search = BeamSearch(
             beam_size=beam_size,
-            weights=weights,
+            weights=self.gridsearchweights[0],
             scorers=scorers,
             sos=asr_model.sos,
             eos=asr_model.eos,
@@ -230,34 +280,37 @@ class Speech2Text:
         # b. Forward Encoder
         enc, _ = self.asr_model.encode(**batch)
         assert len(enc) == 1, len(enc)
+        gridsearch_results=[]
+        for weights in self.gridsearchweights:
+            # c. Passed the encoder result and the beam search
+            self.beam_search.weights=weights   #替换新的weights
+            nbest_hyps = self.beam_search(
+                x=enc[0], maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
+            )
+            nbest_hyps = nbest_hyps[: self.nbest]
 
-        # c. Passed the encoder result and the beam search
-        nbest_hyps = self.beam_search(
-            x=enc[0], maxlenratio=self.maxlenratio, minlenratio=self.minlenratio
-        )
-        nbest_hyps = nbest_hyps[: self.nbest]
+            results = []
+            for hyp in nbest_hyps:
+                assert isinstance(hyp, Hypothesis), type(hyp)
 
-        results = []
-        for hyp in nbest_hyps:
-            assert isinstance(hyp, Hypothesis), type(hyp)
+                # remove sos/eos and get results
+                token_int = hyp.yseq[1:-1].tolist()
 
-            # remove sos/eos and get results
-            token_int = hyp.yseq[1:-1].tolist()
+                # remove blank symbol id, which is assumed to be 0
+                token_int = list(filter(lambda x: x != 0, token_int))
 
-            # remove blank symbol id, which is assumed to be 0
-            token_int = list(filter(lambda x: x != 0, token_int))
+                # Change integer-ids to tokens
+                token = self.converter.ids2tokens(token_int)
 
-            # Change integer-ids to tokens
-            token = self.converter.ids2tokens(token_int)
+                if self.tokenizer is not None:
+                    text = self.tokenizer.tokens2text(token)
+                else:
+                    text = None
+                results.append((text, token, token_int, hyp))
 
-            if self.tokenizer is not None:
-                text = self.tokenizer.tokens2text(token)
-            else:
-                text = None
-            results.append((text, token, token_int, hyp))
-
-        assert check_return_type(results)
-        return results
+            assert check_return_type(results)
+            gridsearch_results.append(results)
+        return gridsearch_results
 
     @staticmethod
     def from_pretrained(
@@ -299,8 +352,9 @@ def inference(
     beam_size: int,
     ngpu: int,
     seed: int,
-    ctc_weight: float,
-    lm_weight: float,
+    ctc_weight: str,
+    lm_weight: str,
+    ilm_weight: str,
     ngram_weight: float,
     penalty: float,
     nbest: int,
@@ -358,6 +412,7 @@ def inference(
         beam_size=beam_size,
         ctc_weight=ctc_weight,
         lm_weight=lm_weight,
+        ilm_weight=ilm_weight,
         ngram_weight=ngram_weight,
         penalty=penalty,
         nbest=nbest,
@@ -393,25 +448,29 @@ def inference(
 
             # N-best list of (text, token, token_int, hyp_object)
             try:
-                results = speech2text(**batch)
+                gridesearchresults = speech2text(**batch)
             except TooShortUttError as e:
                 logging.warning(f"Utterance {keys} {e}")
                 hyp = Hypothesis(score=0.0, scores={}, states={}, yseq=[])
-                results = [[" ", ["<space>"], [2], hyp]] * nbest
-
+                gridesearchresults = [[[" ", ["<space>"], [2], hyp]] * nbest]*len(speech2text.gridsearchweights)
+            assert len(speech2text.gridsearchweights)==len(gridesearchresults)
             # Only supporting batch_size==1
             key = keys[0]
-            for n, (text, token, token_int, hyp) in zip(range(1, nbest + 1), results):
-                # Create a directory: outdir/{n}best_recog
-                ibest_writer = writer[f"{n}best_recog"]
 
-                # Write the result to each file
-                ibest_writer["token"][key] = " ".join(token)
-                ibest_writer["token_int"][key] = " ".join(map(str, token_int))
-                ibest_writer["score"][key] = str(hyp.score)
+            for ri in range(len(speech2text.gridsearchweights)):
+                results=gridesearchresults[ri]
+                subwriter=writer[speech2text.gridsearchweights[ri]["str_param"]]
+                for n, (text, token, token_int, hyp) in zip(range(1, nbest + 1), results):
+                    # Create a directory: outdir/{n}best_recog
+                    ibest_writer = subwriter[f"{n}best_recog"]
 
-                if text is not None:
-                    ibest_writer["text"][key] = text
+                    # Write the result to each file
+                    ibest_writer["token"][key] = " ".join(token)
+                    ibest_writer["token_int"][key] = " ".join(map(str, token_int))
+                    ibest_writer["score"][key] = str(hyp.score)
+
+                    if text is not None:
+                        ibest_writer["text"][key] = text
 
 
 def get_parser():
@@ -533,11 +592,12 @@ def get_parser():
     )
     group.add_argument(
         "--ctc_weight",
-        type=float,
-        default=0.5,
-        help="CTC weight in joint decoding",
+        type=str,
+        default="0.5",
+        help="CTC weight in joint decoding,grid search supoort",
     )
-    group.add_argument("--lm_weight", type=float, default=1.0, help="RNNLM weight")
+    group.add_argument("--lm_weight", type=str, default="1.0", help="RNNLM weight,grid search supoort")
+    group.add_argument("--ilm_weight", type=str, default="1.0", help="ilm_weight,grid search supoort")
     group.add_argument("--ngram_weight", type=float, default=0.9, help="ngram weight")
     group.add_argument("--streaming", type=str2bool, default=False)
 
