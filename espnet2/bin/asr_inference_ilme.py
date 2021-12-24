@@ -636,7 +636,7 @@ def main(cmd=None):
     if kwargs["assigngpu"]!=-1:
         import os
         os.environ["CUDA_VISIBLE_DEVICES"]=str(kwargs["assigngpu"])
-
+    del kwargs['assigngpu']
     inference(**kwargs)
 
 
