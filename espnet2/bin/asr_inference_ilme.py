@@ -496,6 +496,12 @@ def get_parser():
         default=0,
         help="The number of gpus. 0 indicates CPU mode",
     )
+    parser.add_argument(
+        "--assigngpu",
+        type=int,
+        default=-1,
+        help="assigned gpu NO.",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument(
         "--dtype",
@@ -627,6 +633,10 @@ def main(cmd=None):
     args = parser.parse_args(cmd)
     kwargs = vars(args)
     kwargs.pop("config", None)
+    if kwargs["assigngpu"]!=-1:
+        import os
+        os.environ["CUDA_VISIBLE_DEVICES"]=str(kwargs["assigngpu"])
+
     inference(**kwargs)
 
 
