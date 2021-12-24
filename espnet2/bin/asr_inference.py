@@ -397,7 +397,7 @@ def inference(
 
                 if text is not None:
                     ibest_writer["text"][key] = text
-
+            torch.cuda.empty_cache()
 
 def get_parser():
     parser = config_argparse.ArgumentParser(
