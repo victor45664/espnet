@@ -597,7 +597,7 @@ def get_parser():
         help="CTC weight in joint decoding,grid search supoort",
     )
     group.add_argument("--lm_weight", type=str, default="1.0", help="RNNLM weight,grid search supoort")
-    group.add_argument("--ilm_weight", type=str, default="1.0", help="ilm_weight,grid search supoort")
+    group.add_argument("--ilm_weight", type=str, default="0.0", help="ilm_weight,grid search supoort")
     group.add_argument("--ngram_weight", type=float, default=0.9, help="ngram weight")
     group.add_argument("--streaming", type=str2bool, default=False)
 
