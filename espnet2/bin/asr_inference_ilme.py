@@ -131,7 +131,11 @@ class Speech2Text:
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
         #ilme scorer
-        ilm_scorer=IlmScorer(decoder)
+
+        if ilm_weight=="0.0":
+            ilm_scorer=None
+        else:
+            ilm_scorer = IlmScorer(decoder)
         scorers.update(
             decoder=decoder,
             ilm=ilm_scorer,
@@ -182,11 +186,18 @@ class Speech2Text:
             ngram=ngram_weight,
             length_bonus=penalty,
         ))
-
+        dummy_weight = dict(
+            decoder=1.0 ,
+            ctc=1.0,
+            ilm=1.0,
+            lm=1.0,
+            ngram=1.0,
+            length_bonus=1.0,
+        )  #假的 weights，防止beamsearch把 weight为0的scorer 扔掉
 
         beam_search = BeamSearch(
             beam_size=beam_size,
-            weights=self.gridsearchweights[0],
+            weights=dummy_weight,
             scorers=scorers,
             sos=asr_model.sos,
             eos=asr_model.eos,

@@ -35,6 +35,51 @@ from espnet2.utils import config_argparse
 from espnet2.utils.types import str2bool
 from espnet2.utils.types import str2triple_str
 from espnet2.utils.types import str_or_none
+from itertools import product
+
+class GridsearchWeights(object):
+    def __init__(self,weights):
+        list_weight=dict()
+        for key in weights:
+            assert len(str(weights[key]))!=0,"please assign "+key
+            list_weight[key]=self.str2list(str(weights[key]))
+        combinations=list(product(*list(list_weight.values())))
+        self.weights=[]
+        for i in range(len(combinations)):
+            weight=dict()
+            c=0
+            str_param=""
+            for key in weights:
+                weight[key]=combinations[i][c]
+                c+=1
+                str_param+=key+"_"+str(weight[key])+"_"
+            weight["str_param"]=str_param[:-1]   #当前参数组合的文本表示
+            weight["decoder"] = 1.0 - weight["ctc"]   #decoder输出的权重
+            weight["ilm"] = weight["decoder"]*weight["ilm"]  #ilm 的权重是相对于attention分数的权重
+            self.weights.append(weight)
+
+    def __len__(self):
+        return len(self.weights)
+    def __getitem__(self,item):
+        return self.weights[item]
+
+    def str2list(self,instr):
+        out=[]
+        temp=instr.split(",")
+        for i in range(len(temp)):
+            try:
+                out.append(float(temp[i]))
+            except TypeError:
+                logging.error("Format wrong ",instr)
+                raise
+        return out
+
+
+class IlmScorer(BatchScorerInterface):
+    def __init__(self,decoder):
+        self.decoder=decoder
+    def batch_score(self,*argv,**kwargs):
+        return self.decoder.batch_score_ilm(*argv,**kwargs)
 
 
 class Speech2Text:
