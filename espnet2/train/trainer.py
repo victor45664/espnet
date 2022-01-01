@@ -1111,7 +1111,10 @@ class Trainer_ilme_adl(Trainer):
                 log_interval = 100
         model.train()
         if cls.freeze_encoder:
-            model.encoder.eval()
+            if isinstance(model,torch.nn.DataParallel):
+                model.module.encoder.eval()
+            else:
+                model.encoder.eval()
 
         all_steps_are_invalid = True
         # [For distributed] Because iteration counts are not always equals between
