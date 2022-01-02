@@ -109,8 +109,21 @@ class ESPnetASRModel(AbsESPnetModel):
             self.error_calculator = None
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
-
     def forward(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+        forward_ilm=False
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        if forward_ilm:
+            return self.forward_ilm(speech,speech_lengths,text,text_lengths)
+        else:
+            return self.forward_normal(speech, speech_lengths, text, text_lengths)
+
+
+    def forward_normal(
         self,
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
