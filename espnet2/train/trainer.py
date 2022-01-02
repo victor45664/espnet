@@ -1286,29 +1286,34 @@ class Trainer_ilme_adl(Trainer):
 
             with reporter.measure_time("backward_time_ilm"):
                 if float(loss) <= model_adl_begin_loss:
-                    hooks = []
-                    for i in range(len(model_decoder_parameter)):
-                        hooks.append(
-                            model_decoder_parameter[i].register_hook(
-                                lambda grad: grad *
-                                             (1-model_ctc_weight)   #对抗loss 必须和attention loss成比例
-                                             * -model_adl_factor)
-                            # scale the grad every time it is computed
-                        )
+                    decoder_parameter_switch= 1
+                else:
+                    decoder_parameter_switch = 0 #we only apply adl loss to decoder parameter if the ilm loss is low enough
 
-                    if scaler is not None:
-                        # Scales loss.  Calls backward() on scaled loss
-                        # to create scaled gradients.
-                        # Backward passes under autocast are not recommended.
-                        # Backward ops run in the same dtype autocast chose
-                        # for corresponding forward ops.
-                        scaler.scale(loss).backward()
-                    else:
-                        loss.backward()
+                hooks = []
+                for i in range(len(model_decoder_parameter)):
+                    hooks.append(
+                        model_decoder_parameter[i].register_hook(
+                            lambda grad: grad *
+                                         decoder_parameter_switch    #0 or1 it is used to control weather to apply adl loss to decoder parameter
+                                         *(1-model_ctc_weight)   #对抗loss 必须和attention loss成比例
+                                         * -model_adl_factor)
+                        # scale the grad every time it is computed
+                    )
 
-                    for i in range(len(hooks)):
-                        hooks[
-                            i].remove()  # remove the grad scale hook because we only want to scale adl loss and don't want to scale grad from LAS loss
+                if scaler is not None:
+                    # Scales loss.  Calls backward() on scaled loss
+                    # to create scaled gradients.
+                    # Backward passes under autocast are not recommended.
+                    # Backward ops run in the same dtype autocast chose
+                    # for corresponding forward ops.
+                    scaler.scale(loss).backward()
+                else:
+                    loss.backward()
+
+                for i in range(len(hooks)):
+                    hooks[
+                        i].remove()  # remove the grad scale hook because we only want to scale adl loss and don't want to scale grad from LAS loss
 
             if iiter % accum_grad == 0:
                 if scaler is not None:
