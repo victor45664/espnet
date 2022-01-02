@@ -1211,7 +1211,7 @@ class Trainer_ilme_adl(Trainer):
             #ILM forward
             with autocast(scaler is not None):
                 with reporter.measure_time("forward_time_ilm"):
-                    retval = model.forward_ilm(**batch)
+                    retval = model.forward(**batch,forward_ilm=True)
 
                     # Note(kamo):
                     # Supporting two patterns for the returned value from the model
