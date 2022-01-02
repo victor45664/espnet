@@ -1104,6 +1104,22 @@ class Trainer_ilme_adl(Trainer):
         use_wandb = options.use_wandb
         distributed = distributed_option.distributed
 
+        #ilm related these
+        if isinstance(model, torch.nn.DataParallel):
+            model_adl_begin_loss=model.module.adl_begin_loss
+            model_decoder_parameter=model.module.decoder.decoder_parameter
+            model_ctc_weight=model.module.ctc_weight
+            model_adl_factor=model.module.adl_factor
+
+        else:
+            model_adl_begin_loss = model.adl_begin_loss
+            model_decoder_parameter = model.decoder.decoder_parameter
+            model_ctc_weight = model.ctc_weight
+            model_adl_factor = model.adl_factor
+
+
+
+
         if log_interval is None:
             try:
                 log_interval = max(len(iterator) // 20, 10)
@@ -1269,14 +1285,14 @@ class Trainer_ilme_adl(Trainer):
             #ILM backward
 
             with reporter.measure_time("backward_time_ilm"):
-                if float(loss) <= model.adl_begin_loss:
+                if float(loss) <= model_adl_begin_loss:
                     hooks = []
-                    for i in range(len(model.decoder.decoder_parameter)):
+                    for i in range(len(model_decoder_parameter)):
                         hooks.append(
-                            model.decoder.decoder_parameter[i].register_hook(
+                            model_decoder_parameter[i].register_hook(
                                 lambda grad: grad *
-                                             (1-model.ctc_weight)   #对抗loss 必须和attention loss成比例
-                                             * -model.adl_factor)
+                                             (1-model_ctc_weight)   #对抗loss 必须和attention loss成比例
+                                             * -model_adl_factor)
                             # scale the grad every time it is computed
                         )
 
