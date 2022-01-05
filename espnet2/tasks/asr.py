@@ -497,7 +497,10 @@ class ASRTask_ilme(ASRTask):
     @classmethod
     def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
          model=super().build_model(args)
-         model.decoder.init_ilme(args.ilme_conf)
+         if "ilme_conf" in args:
+            model.decoder.init_ilme(args.ilme_conf)
+         else:
+             logging.warning("ilme config is not present decoding as normal model")
          return model
 
     @classmethod
