@@ -541,6 +541,10 @@ class ASRTask_ilme_adl(ASRTask):
     def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel:
          model=super().build_model(args)
          model.decoder.init_ilme(args.ilme_conf)
+         for p in model.decoder.ilme_parameter:
+             p.register_hook(lambda grad: grad *
+                                          float(args.ilme_conf["ilme_param_lr_factor"])
+                             )
          model.adl_begin_loss=args.ilme_conf["adl_begin_loss"]
          model.adl_factor=args.ilme_conf["adl_factor"]
          return model
