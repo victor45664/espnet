@@ -1281,15 +1281,17 @@ class Trainer_ilme_adl(Trainer):
 
                 loss /= accum_grad
 
+            stats["ilm_loss"]=float(loss)*accum_grad   #ilm loss should be invariant to accum_grad
             reporter.register(stats, weight)
             #ILM backward
 
             with reporter.measure_time("backward_time_ilm"):
-                if float(loss) <= model_adl_begin_loss:
+                if float(loss)*accum_grad <= model_adl_begin_loss:
                     decoder_parameter_switch= 1
+
                 else:
                     decoder_parameter_switch = 0 #we only apply adl loss to decoder parameter if the ilm loss is low enough
-
+                reporter.register({"doing_adl": decoder_parameter_switch}, 1)
                 hooks = []
                 for i in range(len(model_decoder_parameter)):
                     hooks.append(
