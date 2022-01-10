@@ -239,11 +239,10 @@ class ESPnetASRModel(AbsESPnetModel):
             ignore_label=self.ignore_id,
         )
 
-        ilm_ppl = torch.exp(loss_ilm)
+
         stats = dict(
             ilm_loss=loss_ilm.detach(),
             ilm_acc=ilm_acc,
-            ilm_ppl=ilm_ppl.detach()
         )
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
