@@ -1079,6 +1079,7 @@ class Trainer_ilme(Trainer):
 
 
 class Trainer_ilme_adl(Trainer):
+    decoder_parameter_switch = 0  # it is almost certain that adl training should not begin adl training at once
     @classmethod
     def train_one_epoch(
         cls,
@@ -1104,7 +1105,9 @@ class Trainer_ilme_adl(Trainer):
         use_wandb = options.use_wandb
         distributed = distributed_option.distributed
 
-        #ilm related these
+        #ilm related
+        ilm_loss_accum=0
+        ilm_loss_accum_count=0
         if isinstance(model, torch.nn.DataParallel):
             model_adl_begin_loss=model.module.adl_begin_loss
             model_decoder_parameter=model.module.decoder.decoder_parameter
@@ -1283,21 +1286,19 @@ class Trainer_ilme_adl(Trainer):
 
             stats["ilm_loss"]=float(loss)*accum_grad   #ilm loss should be invariant to accum_grad
             reporter.register(stats, weight)
+            batch_size=int(weight)
+            ilm_loss_accum +=stats["ilm_loss"]*batch_size
+            ilm_loss_accum_count +=batch_size
             #ILM backward
-
+            reporter.register({"doing_adl": cls.decoder_parameter_switch}, 1)
             with reporter.measure_time("backward_time_ilm"):
-                if float(loss)*accum_grad <= model_adl_begin_loss:
-                    decoder_parameter_switch= 1
 
-                else:
-                    decoder_parameter_switch = 0 #we only apply adl loss to decoder parameter if the ilm loss is low enough
-                reporter.register({"doing_adl": decoder_parameter_switch}, 1)
                 hooks = []
                 for i in range(len(model_decoder_parameter)):
                     hooks.append(
                         model_decoder_parameter[i].register_hook(
                             lambda grad: grad *
-                                         decoder_parameter_switch    #0 or1 it is used to control weather to apply adl loss to decoder parameter
+                                         cls.decoder_parameter_switch    #0 or1 it is used to control weather to apply adl loss to decoder parameter
                                          *(1-model_ctc_weight)   #对抗loss 必须和attention loss成比例
                                          * -model_adl_factor)
                         # scale the grad every time it is computed
@@ -1318,6 +1319,12 @@ class Trainer_ilme_adl(Trainer):
                         i].remove()  # remove the grad scale hook because we only want to scale adl loss and don't want to scale grad from LAS loss
 
             if iiter % accum_grad == 0:
+                if ilm_loss_accum/ilm_loss_accum_count <= model_adl_begin_loss:
+                    cls.decoder_parameter_switch = 1
+                else:
+                    cls.decoder_parameter_switch = 0  # we only apply adl loss to decoder parameter if the ilm loss is low enough
+                ilm_loss_accum=0
+                ilm_loss_accum_count=0
                 if scaler is not None:
                     # Unscales the gradients of optimizer's assigned params in-place
                     for iopt, optimizer in enumerate(optimizers):
