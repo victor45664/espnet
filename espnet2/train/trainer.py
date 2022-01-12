@@ -1286,7 +1286,7 @@ class Trainer_ilme_adl(Trainer):
 
             reporter.register(stats, weight)
             batch_size=int(weight)
-            ilm_loss_accum +=stats["ilm_loss"]*batch_size
+            ilm_loss_accum +=float(stats["ilm_loss"])*batch_size
             ilm_loss_accum_count +=batch_size
             #ILM backward
             reporter.register({"doing_adl": cls.decoder_parameter_switch}, 1)
