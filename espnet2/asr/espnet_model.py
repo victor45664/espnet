@@ -239,15 +239,15 @@ class ESPnetASRModel(AbsESPnetModel):
             ignore_label=self.ignore_id,
         )
 
-
+        loss=loss_ilm+1 #make sure
         stats = dict(
             ilm_loss=loss_ilm.detach(),
             ilm_acc=ilm_acc,
         )
 
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
-        loss, stats, weight = force_gatherable((loss_ilm, stats, batch_size), loss_ilm.device)
-        return loss_ilm, stats, weight
+        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss_ilm.device)
+        return loss, stats, weight
 
 
     def collect_feats(

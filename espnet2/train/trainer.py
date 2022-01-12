@@ -1284,7 +1284,6 @@ class Trainer_ilme_adl(Trainer):
 
                 loss /= accum_grad
 
-            stats["ilm_loss"]=float(loss)*accum_grad   #ilm loss should be invariant to accum_grad
             reporter.register(stats, weight)
             batch_size=int(weight)
             ilm_loss_accum +=stats["ilm_loss"]*batch_size
