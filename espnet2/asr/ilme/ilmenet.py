@@ -18,9 +18,14 @@ class ACL(torch.nn.Module):
                 self.linears.append(torch.nn.ReLU())
             elif activations[i]=="sigmoid":
                 self.linears.append(torch.nn.Sigmoid())
+            elif activations[i]=="leaky_relu":
+                self.linears.append(torch.nn.LeakyReLU(0.1))
             elif activations[i]=="none":
                 pass
-
+            else:
+                raise NotImplementedError(
+                    f"`activations {activations[i]}` is only suporrted"
+                )
 
 
     def forward(self,queryvector,yi):  #所有ilme方法的forward参数需要保持一致 yi是为 minilstm保留的
