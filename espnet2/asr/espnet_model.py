@@ -195,7 +195,6 @@ class ESPnetASRModel(AbsESPnetModel):
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
 
-
     def forward_ilm(
         self,
         speech: torch.Tensor,
@@ -249,6 +248,87 @@ class ESPnetASRModel(AbsESPnetModel):
         loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
         return loss, stats, weight
 
+    def forward_ilm_validation(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Frontend + Encoder + Decoder + Calc loss
+
+        Args:
+            speech: (Batch, Length, ...) not nessesary it is only used to get device of tensor
+            speech_lengths: (Batch, )   not nessesary it is only used to get device of tensor
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        """
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+                text.shape[0]
+                == text_lengths.shape[0]
+        ), (text.shape, text_lengths.shape)
+        batch_size = text.shape[0]
+
+        # for data-parallel
+        text = text[:, : text_lengths.max()]
+        encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+        ys_in_pad, ys_out_pad = add_sos_eos(text, self.sos, self.eos, self.ignore_id)
+        ys_in_lens = text_lengths + 1
+
+        fake_encoder_out = speech.new_zeros(batch_size, 1, self.encoder._output_size)
+        # 1. Forward ilm decoder
+        ilm_decoder_out, _ = self.decoder.forward_ilm(
+            fake_encoder_out, -1, ys_in_pad, ys_in_lens
+        )
+
+        decoder_out, _ = self.decoder(
+            encoder_out, encoder_out_lens, ys_in_pad, ys_in_lens
+        )
+
+        # 2. Compute ilm loss
+        loss_ilm = self.criterion_att(ilm_decoder_out, ys_out_pad)
+
+        ilm_acc = th_accuracy(
+            ilm_decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+
+        log_softmax_decoder_out = torch.log_softmax(decoder_out, dim=2)
+        log_softmax_ilm_decoder_out = torch.log_softmax(ilm_decoder_out, dim=2)
+
+        fused_decoder_out=log_softmax_decoder_out-0.8*log_softmax_ilm_decoder_out
+        fused_ilm_acc8 = th_accuracy(
+            fused_decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+        fused_decoder_out=log_softmax_decoder_out-0.7*log_softmax_ilm_decoder_out
+        fused_ilm_acc7 = th_accuracy(
+            fused_decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+        fused_decoder_out=log_softmax_decoder_out-0.9*log_softmax_ilm_decoder_out
+        fused_ilm_acc9 = th_accuracy(
+            fused_decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+        loss = loss_ilm + 1  # make sure
+        stats = dict(
+            ilm_loss=loss_ilm.detach(),
+            ilm_acc=ilm_acc,
+            fused_acc_7=fused_ilm_acc7,
+            fused_acc_8=fused_ilm_acc8,
+            fused_acc_9=fused_ilm_acc9,
+        )
+
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
+        return loss, stats, weight
 
     def collect_feats(
         self,

@@ -155,7 +155,7 @@ class BatchBeamSearch(BeamSearch):
         states = dict()
         for k, d in self.full_scorers.items():
             scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x)
-        return scores, states
+        return scores, states   #log分数求和
 
     def score_partial(
         self, hyp: BatchHypothesis, ids: torch.Tensor, x: torch.Tensor

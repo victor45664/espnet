@@ -118,7 +118,7 @@ class MultiHeadedAttention(nn.Module):
         #ilme
         if args["ilmetype"]=="nacl":
             from espnet2.asr.ilme.ilmenet import NACL
-            self.ilme=NACL(self.encoder_output_size)
+            self.ilme=NACL(self.n_feat)
         elif args["ilmetype"]=="acl":
             from espnet2.asr.ilme.ilmenet import ACL
             self.ilme=ACL(self.n_feat,args["acllayers"],args["aclactivations"],self.n_feat)
