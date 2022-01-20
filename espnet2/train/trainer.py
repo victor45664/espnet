@@ -1058,7 +1058,7 @@ class Trainer_ilme(Trainer):
             if no_forward_run:
                 continue
 
-            retval = model.forward_ilm_validation(**batch)
+            retval = model.forward_ilm(**batch)
             if isinstance(retval, dict):
                 stats = retval["stats"]
                 weight = retval["weight"]
