@@ -547,6 +547,7 @@ class ASRTask_ilme_adl(ASRTask):
                              )
          model.adl_begin_loss=args.ilme_conf["adl_begin_loss"]
          model.adl_factor=args.ilme_conf["adl_factor"]
+
          return model
 
     @classmethod
@@ -571,6 +572,12 @@ class ASRTask_ilme_adl(ASRTask):
         else:
             cls.trainer.freeze_encoder = False
             mymodel=model  #需要更新encoder参数，等效于整个模型的参数都需要更新
+
+
+        if "do_las_when_adl_loss_is_low" not in args.ilme_conf or args.ilme_conf["do_las_when_adl_loss_is_low"] == True:  # default to True
+            cls.trainer.do_las_when_adl_loss_is_low = True
+        else:
+            cls.trainer.do_las_when_adl_loss_is_low = False  #LAS loss will not be backproped if ilme loss is too low(only the ilme param will be updated)
         optimizers = super().build_optimizers(args,mymodel)
 
         return optimizers
