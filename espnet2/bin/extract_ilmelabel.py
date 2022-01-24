@@ -263,10 +263,11 @@ def inference(
                 length=int(batch["text_lengths"][i])
                 las_label=las_output[i][:length+1,:]
                 ilm_label=ilm_output[i][:length+1,:]
-                np.save(os.path.join(output_dir,key+"_las.npy"),las_label)
-                np.save(os.path.join(output_dir,key+"_ilm.npy"),ilm_label)
                 writer["las_label"][key] = os.path.join(output_dir,key+"_las.npy")
                 writer["ilm_label"][key] = os.path.join(output_dir,key+"_ilm.npy")
+                np.save(os.path.join(output_dir,key+"_las.npy"),las_label)
+                np.save(os.path.join(output_dir,key+"_ilm.npy"),ilm_label)
+
 
 
 
