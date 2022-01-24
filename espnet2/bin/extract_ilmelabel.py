@@ -257,7 +257,8 @@ def inference(
 
             las_output,ilm_output = speech2text(batch)
 
-            # Only supporting batch_size==1
+            las_output=np.array(las_output.detach().cpu())
+            ilm_output=np.array(ilm_output.detach().cpu())
             for i in range(len(keys)):
                 key = keys[i]
                 length=int(batch["text_lengths"][i])
