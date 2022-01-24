@@ -268,7 +268,7 @@ def inference(
                 writer["ilm_label"][key] = os.path.join(output_dir,key+"_ilm.npy")
                 np.save(os.path.join(output_dir,key+"_las.npy"),las_label)
                 np.save(os.path.join(output_dir,key+"_ilm.npy"),ilm_label)
-
+            torch.cuda.empty_cache()
 
 
 
