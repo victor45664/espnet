@@ -14,7 +14,7 @@ from espnet.nets.e2e_asr_common import ErrorCalculator
 from espnet.nets.pytorch_backend.nets_utils import th_accuracy
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
-    LabelSmoothingLoss,  # noqa: H301
+    LabelSmoothingLoss,LabelSmoothingLoss_kd  # noqa: H301
 )
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
@@ -109,6 +109,7 @@ class ESPnetASRModel(AbsESPnetModel):
             self.error_calculator = None
 
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
+
     def forward(
         self,
         speech: torch.Tensor,
@@ -600,3 +601,201 @@ class ESPnetASRModel(AbsESPnetModel):
         ys_pad_lens: torch.Tensor,
     ):
         raise NotImplementedError
+
+
+class ESPnetASRModel_kd(ESPnetASRModel):
+    def __init__(
+            self,
+            vocab_size: int,
+            token_list: Union[Tuple[str, ...], List[str]],
+            frontend: Optional[AbsFrontend],
+            specaug: Optional[AbsSpecAug],
+            normalize: Optional[AbsNormalize],
+            preencoder: Optional[AbsPreEncoder],
+            encoder: AbsEncoder,
+            postencoder: Optional[AbsPostEncoder],
+            decoder: AbsDecoder,
+            ctc: CTC,
+            rnnt_decoder: None,
+            ctc_weight: float = 0.5,
+            ignore_id: int = -1,
+            lsm_weight: float = 0.0,
+            length_normalized_loss: bool = False,
+            report_cer: bool = True,
+            report_wer: bool = True,
+            sym_space: str = "<space>",
+            sym_blank: str = "<blank>",
+            extract_feats_in_collect_stats: bool = True,
+    ):
+        assert check_argument_types()
+        assert 0.0 <= ctc_weight <= 1.0, ctc_weight
+        assert rnnt_decoder is None, "Not implemented"
+        super(ESPnetASRModel, self).__init__()
+        # note that eos is the same as sos (equivalent ID)
+        self.sos = vocab_size - 1
+        self.eos = vocab_size - 1
+        self.vocab_size = vocab_size
+        self.ignore_id = ignore_id
+        self.ctc_weight = ctc_weight
+        self.token_list = token_list.copy()
+
+        self.frontend = frontend
+        self.specaug = specaug
+        self.normalize = normalize
+        self.preencoder = preencoder
+        self.postencoder = postencoder
+        self.encoder = encoder
+        # we set self.decoder = None in the CTC mode since
+        # self.decoder parameters were never used and PyTorch complained
+        # and threw an Exception in the multi-GPU experiment.
+        # thanks Jeff Farris for pointing out the issue.
+        if ctc_weight == 1.0:
+            self.decoder = None
+        else:
+            self.decoder = decoder
+        if ctc_weight == 0.0:
+            self.ctc = None
+        else:
+            self.ctc = ctc
+        self.rnnt_decoder = rnnt_decoder
+        self.criterion_att = LabelSmoothingLoss_kd(
+            size=vocab_size,
+            padding_idx=ignore_id,
+            smoothing=lsm_weight,
+            normalize_length=length_normalized_loss,
+        )
+
+        if report_cer or report_wer:
+            self.error_calculator = ErrorCalculator(
+                token_list, sym_space, sym_blank, report_cer, report_wer
+            )
+        else:
+            self.error_calculator = None
+
+        self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
+
+    def forward(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+        ilm_label: torch.Tensor,
+        las_label: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Frontend + Encoder + Decoder + Calc loss
+
+        Args:
+            speech: (Batch, Length, ...)
+            speech_lengths: (Batch, )
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        """
+
+        assert (
+            speech.shape[0]
+            == speech_lengths.shape[0]
+            == ilm_label.shape[0]
+        ), (speech.shape, speech_lengths.shape, ilm_label.shape)
+        batch_size = speech.shape[0]
+
+        # for data-parallel
+        ilm_label = ilm_label[:, : text_lengths.max()+1]
+        las_label = las_label[:, : text_lengths.max()+1]
+
+        # 1. Encoder
+        encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+
+        # 2a. Attention-decoder branch
+        if self.ctc_weight == 1.0:
+            loss_att_org,loss_att_kd, acc_att, cer_att, wer_att = None, None, None, None
+        else:
+            loss_att_org,loss_att_kd, acc_att, cer_att, wer_att = self._calc_att_loss(
+                encoder_out, encoder_out_lens, text,text_lengths,ilm_label,las_label
+            )
+
+        # 2b. CTC branch
+        if self.ctc_weight == 0.0:
+
+            loss_ctc, cer_ctc = None, None
+        else:
+            loss_ctc, cer_ctc = self._calc_ctc_loss(
+                encoder_out, encoder_out_lens, text, text_lengths
+            )
+
+        # 2c. RNN-T branch
+        if self.rnnt_decoder is not None:
+            _ = self._calc_rnnt_loss(encoder_out, encoder_out_lens, text, text_lengths)
+        loss_att = (1 - self.kd_alpha) * loss_att_org + self.kd_alpha * loss_att_kd
+
+        if self.ctc_weight == 0.0:
+            loss = loss_att
+        elif self.ctc_weight == 1.0:
+            loss = loss_ctc
+        else:
+            loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
+
+        stats = dict(
+            loss=loss.detach(),
+            loss_att=loss_att_org.detach() if loss_att is not None else None,
+            loss_att_kd=loss_att_kd.detach() if loss_att_kd is not None else None,
+            loss_ctc=loss_ctc.detach() if loss_ctc is not None else None,
+            acc=acc_att,
+            cer=cer_att,
+            wer=wer_att,
+            cer_ctc=cer_ctc,
+        )
+
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
+        return loss, stats, weight
+
+
+
+    def _calc_att_loss(
+        self,
+        encoder_out: torch.Tensor,
+        encoder_out_lens: torch.Tensor,
+        ys_pad: torch.Tensor,
+        ys_pad_lens : torch.Tensor,
+        ilm_label: torch.Tensor,
+        las_label: torch.Tensor,
+    ):
+        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
+        ys_in_lens = ys_pad_lens + 1
+
+        # 1. Forward decoder
+        decoder_out, _ = self.decoder(
+            encoder_out, encoder_out_lens, ys_in_pad, ys_in_lens
+        )
+
+        with torch.no_grad():
+            teach_labels=las_label-self.kd_ilme_factor*ilm_label
+            teach_labels=torch.nn.functional.softmax(teach_labels / self.kd_T,dim=2)
+        # 2. Compute attention loss
+        loss_att,kd_loss = self.criterion_att(decoder_out, ys_out_pad,teach_labels)
+
+        acc_att = th_accuracy(
+            decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+
+        # Compute cer/wer using attention-decoder
+        if self.training or self.error_calculator is None:
+            cer_att, wer_att = None, None
+        else:
+            ys_hat = decoder_out.argmax(dim=-1)
+            cer_att, wer_att = self.error_calculator(ys_hat.cpu(), ys_pad.cpu())
+
+        return loss_att,kd_loss, acc_att, cer_att, wer_att
+
+
+    def kd_loss(self,outputs,labels,teacher_outputs):
+
+
+
+        KD_loss = torch.nn.KLDivLoss()(torch.nn.functional.log_softmax(outputs / self.kd_T, dim=1),
+                                 torch.nn.functional.softmax(teacher_outputs / self.kd_T, dim=1)) * ( self.kd_alpha * self.kd_T * self.kd_T) + \
+                  torch.nn.functional.cross_entropy(outputs, labels) * (1. -  self.kd_alpha)
+        return KD_loss
