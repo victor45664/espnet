@@ -94,7 +94,7 @@ class LabelSmoothingLoss_kd(nn.Module):
         self.true_dist = None
         self.normalize_length = normalize_length
 
-    def forward(self, x, target,teacher_labels):
+    def forward(self, x, target,teacher_labels=-1):
         """Compute loss between x and target.
 
         :param torch.Tensor x: prediction (batch, seqlen, class)
@@ -115,8 +115,13 @@ class LabelSmoothingLoss_kd(nn.Module):
             target = target.masked_fill(ignore, 0)  # avoid -1 index
             true_dist.scatter_(1, target.unsqueeze(1), self.confidence)
         kl = self.criterion(torch.log_softmax(x, dim=1), true_dist)
-        kd_kl = self.criterion(torch.log_softmax(x, dim=1), teacher_labels.view(-1,self.size))
+
         denom = total if self.normalize_length else batch_size
         kl_loss=kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
-        kd_loss=kd_kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
-        return kl_loss,kd_loss  #original loss and knowledge distilling loss
+
+        if self.training:
+            kd_kl = self.criterion(torch.log_softmax(x, dim=1), teacher_labels.view(-1, self.size))
+            kd_loss = kd_kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
+            return kl_loss,kd_loss  #original loss and knowledge distilling loss
+        else:
+            return kl_loss

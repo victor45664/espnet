@@ -63,7 +63,7 @@ from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import CommonPreprocessor
-from espnet2.train.trainer import Trainer,Trainer_ilme,Trainer_ilme_adl
+from espnet2.train.trainer import Trainer,Trainer_ilme,Trainer_ilme_adl,Trainer_kd
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import float_or_none
@@ -479,6 +479,34 @@ class ASRTask(AbsTask):
         return model
 
 class ASRTask_kd(ASRTask):
+    trainer = Trainer_kd
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        class fakemodel(object):
+            #假模型，用于替换parameters
+            def __init__(self,para):
+                self.para=para
+            def parameters(self):
+                return self.para
+
+
+        if "freeze_encoder" not in args.kd_conf or args.kd_conf["freeze_encoder"]==True: #默认冻结encoder参数
+            mymodel = fakemodel(list(model.decoder.parameters())) #一个只含有decoder参数的假model，用于指定更新哪些参数，只更新decoder参数
+            for para in model.encoder.parameters():
+                para.requires_grad = False
+            cls.trainer.freeze_encoder=True
+        else:
+            cls.trainer.freeze_encoder = False
+            mymodel=model  #需要更新encoder参数，等效于整个模型的参数都需要更新
+
+        optimizers = super().build_optimizers(args,mymodel)
+
+        return optimizers
+
 
     @classmethod
     def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel_kd:

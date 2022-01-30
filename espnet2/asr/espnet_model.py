@@ -675,6 +675,16 @@ class ESPnetASRModel_kd(ESPnetASRModel):
         self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
 
     def forward(
+            self,
+            *args, **kwargs
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+
+        if self.training:
+            return self.forward_train(*args, **kwargs)
+        else:
+            return super().forward(*args, **kwargs)
+
+    def forward_train(
         self,
         speech: torch.Tensor,
         speech_lengths: torch.Tensor,
@@ -710,7 +720,7 @@ class ESPnetASRModel_kd(ESPnetASRModel):
         if self.ctc_weight == 1.0:
             loss_att_org,loss_att_kd, acc_att, cer_att, wer_att = None, None, None, None
         else:
-            loss_att_org,loss_att_kd, acc_att, cer_att, wer_att = self._calc_att_loss(
+            loss_att_org,loss_att_kd, acc_att, cer_att, wer_att = self._calc_att_loss_kd(
                 encoder_out, encoder_out_lens, text,text_lengths,ilm_label,las_label
             )
 
@@ -752,7 +762,7 @@ class ESPnetASRModel_kd(ESPnetASRModel):
 
 
 
-    def _calc_att_loss(
+    def _calc_att_loss_kd(
         self,
         encoder_out: torch.Tensor,
         encoder_out_lens: torch.Tensor,
@@ -770,10 +780,10 @@ class ESPnetASRModel_kd(ESPnetASRModel):
         )
 
         with torch.no_grad():
-            teach_labels=las_label-self.kd_ilme_factor*ilm_label
-            teach_labels=torch.nn.functional.softmax(teach_labels / self.kd_T,dim=2)
+            teacher_labels=las_label-self.kd_ilme_factor*ilm_label
+            teacher_labels=torch.nn.functional.softmax(teacher_labels / self.kd_T,dim=2)
         # 2. Compute attention loss
-        loss_att,kd_loss = self.criterion_att(decoder_out, ys_out_pad,teach_labels)
+        loss_att,kd_loss = self.criterion_att(decoder_out, ys_out_pad,teacher_labels=teacher_labels)
 
         acc_att = th_accuracy(
             decoder_out.view(-1, self.vocab_size),
