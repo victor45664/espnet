@@ -14,7 +14,7 @@ from espnet.nets.e2e_asr_common import ErrorCalculator
 from espnet.nets.pytorch_backend.nets_utils import th_accuracy
 from espnet.nets.pytorch_backend.transformer.add_sos_eos import add_sos_eos
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import (
-    LabelSmoothingLoss,LabelSmoothingLoss_kd  # noqa: H301
+    LabelSmoothingLoss,LabelSmoothingLoss_kd,LabelSmoothingLoss_unadl  # noqa: H301
 )
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
@@ -601,6 +601,150 @@ class ESPnetASRModel(AbsESPnetModel):
         ys_pad_lens: torch.Tensor,
     ):
         raise NotImplementedError
+
+
+class ESPnetASRModel_unadl(ESPnetASRModel):
+    def __init__(
+            self,
+            vocab_size: int,
+            token_list: Union[Tuple[str, ...], List[str]],
+            frontend: Optional[AbsFrontend],
+            specaug: Optional[AbsSpecAug],
+            normalize: Optional[AbsNormalize],
+            preencoder: Optional[AbsPreEncoder],
+            encoder: AbsEncoder,
+            postencoder: Optional[AbsPostEncoder],
+            decoder: AbsDecoder,
+            ctc: CTC,
+            rnnt_decoder: None,
+            ctc_weight: float = 0.5,
+            ignore_id: int = -1,
+            lsm_weight: float = 0.0,
+            length_normalized_loss: bool = False,
+            report_cer: bool = True,
+            report_wer: bool = True,
+            sym_space: str = "<space>",
+            sym_blank: str = "<blank>",
+            extract_feats_in_collect_stats: bool = True,
+    ):
+        assert check_argument_types()
+        assert 0.0 <= ctc_weight <= 1.0, ctc_weight
+        assert rnnt_decoder is None, "Not implemented"
+        super(ESPnetASRModel, self).__init__()
+        # note that eos is the same as sos (equivalent ID)
+        self.sos = vocab_size - 1
+        self.eos = vocab_size - 1
+        self.vocab_size = vocab_size
+        self.ignore_id = ignore_id
+        self.ctc_weight = ctc_weight
+        self.token_list = token_list.copy()
+
+        self.frontend = frontend
+        self.specaug = specaug
+        self.normalize = normalize
+        self.preencoder = preencoder
+        self.postencoder = postencoder
+        self.encoder = encoder
+        # we set self.decoder = None in the CTC mode since
+        # self.decoder parameters were never used and PyTorch complained
+        # and threw an Exception in the multi-GPU experiment.
+        # thanks Jeff Farris for pointing out the issue.
+        if ctc_weight == 1.0:
+            self.decoder = None
+        else:
+            self.decoder = decoder
+        if ctc_weight == 0.0:
+            self.ctc = None
+        else:
+            self.ctc = ctc
+        self.rnnt_decoder = rnnt_decoder
+        self.criterion_att = LabelSmoothingLoss_unadl(
+            size=vocab_size,
+            padding_idx=ignore_id,
+            smoothing=lsm_weight,
+            normalize_length=length_normalized_loss,
+        )
+
+        if report_cer or report_wer:
+            self.error_calculator = ErrorCalculator(
+                token_list, sym_space, sym_blank, report_cer, report_wer
+            )
+        else:
+            self.error_calculator = None
+
+        self.extract_feats_in_collect_stats = extract_feats_in_collect_stats
+
+
+
+    def forward(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+        forward_ilm=False,
+        do_adl=False,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        if forward_ilm:
+            return self.forward_ilm(speech,speech_lengths,text,text_lengths,do_adl)
+        else:
+            return self.forward_normal(speech, speech_lengths, text, text_lengths)
+
+    def forward_ilm(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,adl_loss=False,
+    ) -> Tuple[torch.Tensor,torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Frontend + Encoder + Decoder + Calc loss
+
+        Args:
+            speech: (Batch, Length, ...) not nessesary it is only used to get device of tensor
+            speech_lengths: (Batch, )   not nessesary it is only used to get device of tensor
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        """
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+            text.shape[0]
+            == text_lengths.shape[0]
+        ), (text.shape, text_lengths.shape)
+        batch_size = text.shape[0]
+
+        # for data-parallel
+        text = text[:, : text_lengths.max()]
+
+        ys_in_pad, ys_out_pad = add_sos_eos(text, self.sos, self.eos, self.ignore_id)
+        ys_in_lens = text_lengths + 1
+
+        fake_encoder_out=speech.new_zeros(batch_size,1,self.encoder._output_size)
+        # 1. Forward decoder
+        decoder_out, _ = self.decoder.forward_ilm(
+            fake_encoder_out, -1, ys_in_pad, ys_in_lens
+        )
+
+        # 2. Compute ilm loss
+        loss_ilm,unadl_loss = self.criterion_att(decoder_out, ys_out_pad,adl_loss=True)
+        ilm_acc = th_accuracy(
+            decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+
+        loss=loss_ilm+1 #make sure
+        unadl_loss_cp=unadl_loss+1
+        stats = dict(
+            ilm_loss=loss_ilm.detach(),
+            unadl_loss=unadl_loss.detach(),
+            ilm_acc=ilm_acc,
+        )
+
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss,unadl_loss_cp, stats, weight = force_gatherable((loss,unadl_loss_cp, stats, batch_size), loss.device)
+        return loss,unadl_loss_cp, stats, weight
+
 
 
 class ESPnetASRModel_kd(ESPnetASRModel):

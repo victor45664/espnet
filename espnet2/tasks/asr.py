@@ -40,7 +40,7 @@ from espnet2.asr.encoder.contextual_block_conformer_encoder import (
 )
 from espnet2.asr.encoder.vgg_rnn_encoder import VGGRNNEncoder
 from espnet2.asr.encoder.wav2vec2_encoder import FairSeqWav2Vec2Encoder
-from espnet2.asr.espnet_model import ESPnetASRModel,ESPnetASRModel_kd
+from espnet2.asr.espnet_model import ESPnetASRModel,ESPnetASRModel_kd,ESPnetASRModel_unadl
 from espnet2.asr.frontend.abs_frontend import AbsFrontend
 from espnet2.asr.frontend.default import DefaultFrontend
 from espnet2.asr.frontend.s3prl import S3prlFrontend
@@ -63,7 +63,7 @@ from espnet2.torch_utils.initialize import initialize
 from espnet2.train.class_choices import ClassChoices
 from espnet2.train.collate_fn import CommonCollateFn
 from espnet2.train.preprocessor import CommonPreprocessor
-from espnet2.train.trainer import Trainer,Trainer_ilme,Trainer_ilme_adl,Trainer_kd
+from espnet2.train.trainer import Trainer,Trainer_ilme,Trainer_ilme_adl,Trainer_kd,Trainer_ilme_unadl
 from espnet2.utils.get_default_kwargs import get_default_kwargs
 from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import float_or_none
@@ -727,6 +727,174 @@ class ASRTask_ilme_adl(ASRTask):
          model.adl_factor=args.ilme_conf["adl_factor"]
 
          return model
+
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        class fakemodel(object):
+            #假模型，用于替换parameters
+            def __init__(self,para):
+                self.para=para
+            def parameters(self):
+                return self.para
+
+
+        if "freeze_encoder" not in args.ilme_conf or args.ilme_conf["freeze_encoder"]==True: #默认冻结encoder参数
+            mymodel = fakemodel(list(model.decoder.parameters())) #一个只含有decoder参数的假model，用于指定更新哪些参数，自然包括ilme的参数
+            for para in model.encoder.parameters():
+                para.requires_grad = False
+            cls.trainer.freeze_encoder=True
+        else:
+            cls.trainer.freeze_encoder = False
+            mymodel=model  #需要更新encoder参数，等效于整个模型的参数都需要更新
+
+
+        if "do_las_when_adl_loss_is_low" not in args.ilme_conf or args.ilme_conf["do_las_when_adl_loss_is_low"] == True:  # default to True
+            cls.trainer.do_las_when_adl_loss_is_low = True
+        else:
+            cls.trainer.do_las_when_adl_loss_is_low = False  #LAS loss will not be backproped if ilme loss is too low(only the ilme param will be updated)
+        optimizers = super().build_optimizers(args,mymodel)
+
+        return optimizers
+
+
+
+class ASRTask_ilme_unadl(ASRTask):
+
+    @classmethod
+    def add_task_arguments(cls, parser: argparse.ArgumentParser):
+        super().add_task_arguments(parser)
+        group = parser.add_argument_group(description="ilme related")
+        group.add_argument(
+            f"--ilme_conf",
+            action=NestedDictAction,
+            default=dict(),
+            help=f"The keyword arguments for ilme",
+        )
+
+    trainer = Trainer_ilme_unadl
+
+
+    @classmethod
+    def build_model(cls, args: argparse.Namespace) -> ESPnetASRModel_unadl:
+        assert check_argument_types()
+        if isinstance(args.token_list, str):
+            with open(args.token_list, encoding="utf-8") as f:
+                token_list = [line.rstrip() for line in f]
+
+            # Overwriting token_list to keep it as "portable".
+            args.token_list = list(token_list)
+        elif isinstance(args.token_list, (tuple, list)):
+            token_list = list(args.token_list)
+        else:
+            raise RuntimeError("token_list must be str or list")
+        vocab_size = len(token_list)
+        logging.info(f"Vocabulary size: {vocab_size }")
+
+        # 1. frontend
+        if args.input_size is None:
+            # Extract features in the model
+            frontend_class = frontend_choices.get_class(args.frontend)
+            frontend = frontend_class(**args.frontend_conf)
+            input_size = frontend.output_size()
+        else:
+            # Give features from data-loader
+            args.frontend = None
+            args.frontend_conf = {}
+            frontend = None
+            input_size = args.input_size
+
+        # 2. Data augmentation for spectrogram
+        if args.specaug is not None:
+            specaug_class = specaug_choices.get_class(args.specaug)
+            specaug = specaug_class(**args.specaug_conf)
+        else:
+            specaug = None
+
+        # 3. Normalization layer
+        if args.normalize is not None:
+            normalize_class = normalize_choices.get_class(args.normalize)
+            normalize = normalize_class(**args.normalize_conf)
+        else:
+            normalize = None
+
+        # 4. Pre-encoder input block
+        # NOTE(kan-bayashi): Use getattr to keep the compatibility
+        if getattr(args, "preencoder", None) is not None:
+            preencoder_class = preencoder_choices.get_class(args.preencoder)
+            preencoder = preencoder_class(**args.preencoder_conf)
+            input_size = preencoder.output_size()
+        else:
+            preencoder = None
+
+        # 4. Encoder
+        encoder_class = encoder_choices.get_class(args.encoder)
+        encoder = encoder_class(input_size=input_size, **args.encoder_conf)
+
+        # 5. Post-encoder block
+        # NOTE(kan-bayashi): Use getattr to keep the compatibility
+        encoder_output_size = encoder.output_size()
+        if getattr(args, "postencoder", None) is not None:
+            postencoder_class = postencoder_choices.get_class(args.postencoder)
+            postencoder = postencoder_class(
+                input_size=encoder_output_size, **args.postencoder_conf
+            )
+            encoder_output_size = postencoder.output_size()
+        else:
+            postencoder = None
+
+        # 5. Decoder
+        decoder_class = decoder_choices.get_class(args.decoder)
+
+        decoder = decoder_class(
+            vocab_size=vocab_size,
+            encoder_output_size=encoder_output_size,
+            **args.decoder_conf,
+        )
+
+        # 6. CTC
+        ctc = CTC(
+            odim=vocab_size, encoder_output_sizse=encoder_output_size, **args.ctc_conf
+        )
+
+        # 7. RNN-T Decoder (Not implemented)
+        rnnt_decoder = None
+
+        # 8. Build model
+        model = ESPnetASRModel_unadl(
+            vocab_size=vocab_size,
+            frontend=frontend,
+            specaug=specaug,
+            normalize=normalize,
+            preencoder=preencoder,
+            encoder=encoder,
+            postencoder=postencoder,
+            decoder=decoder,
+            ctc=ctc,
+            rnnt_decoder=rnnt_decoder,
+            token_list=token_list,
+            **args.model_conf,
+        )
+
+        # FIXME(kamo): Should be done in model?
+        # 9. Initialize
+        if args.init is not None:
+            initialize(model, args.init)
+
+        #10. ilme adl related
+        model.decoder.init_ilme(args.ilme_conf)
+        for p in model.decoder.ilme_parameter:
+            p.register_hook(lambda grad: grad *
+                                          float(args.ilme_conf["ilme_param_lr_factor"])
+                             )
+        model.adl_begin_loss=args.ilme_conf["adl_begin_loss"]
+        model.adl_factor=args.ilme_conf["adl_factor"]
+        assert check_return_type(model)
+        return model
+
 
     @classmethod
     def build_optimizers(
