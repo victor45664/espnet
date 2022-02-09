@@ -871,8 +871,6 @@ class Trainer_kd(Trainer):
 
             with autocast(scaler is not None):
                 with reporter.measure_time("forward_time"):
-                    del batch["las_label_lengths"]
-                    del batch["ilm_label_lengths"]
                     retval = model(**batch)
 
                     # Note(kamo):
