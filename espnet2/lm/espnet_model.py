@@ -10,7 +10,7 @@ from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet2.lm.abs_model import AbsLM
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
-
+from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import LabelSmoothingLoss_kd
 
 class ESPnetLanguageModel(AbsESPnetModel):
     def __init__(self, lm: AbsLM, vocab_size: int, ignore_id: int = 0):
@@ -129,3 +129,143 @@ class ESPnetLanguageModel(AbsESPnetModel):
         self, text: torch.Tensor, text_lengths: torch.Tensor
     ) -> Dict[str, torch.Tensor]:
         return {}
+
+
+
+class ESPnetLanguageModel_kd(ESPnetLanguageModel):
+
+    def __init__(self, lm: AbsLM,ilm_for_kd: torch.nn.Module, vocab_size: int, ignore_id: int = 0):
+        assert check_argument_types()
+        super(ESPnetLanguageModel, self).__init__()
+        self.lm = lm
+        self.lm_parameters=self.parameters()  #parameters in lm model
+        self.decoder=ilm_for_kd   #这里加decoder是为了方便 从asr模型的参数中初始化
+        self.decoder.eval()       #ILM 应该始终保持eval模式
+        self.sos = vocab_size - 1
+        self.eos = vocab_size - 1
+
+        # ignore_id may be assumed as 0, shared with CTC-blank symbol for ASR.
+        self.ignore_id = ignore_id
+        self.kl_loss=torch.nn.KLDivLoss(reduction="none")
+    def nll(
+        self,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+        max_length: Optional[int] = None,doing_kd=False
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute negative log likelihood(nll)
+
+        Normally, this function is called in batchify_nll.
+        Args:
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+            max_lengths: int
+        """
+        batch_size = text.size(0)
+        # For data parallel
+        if max_length is None:
+            text = text[:, : text_lengths.max()]
+        else:
+            text = text[:, :max_length]
+
+        # 1. Create a sentence pair like '<sos> w1 w2 w3' and 'w1 w2 w3 <eos>'
+        # text: (Batch, Length) -> x, y: (Batch, Length + 1)
+        x = F.pad(text, [1, 0], "constant", self.eos)
+        t = F.pad(text, [0, 1], "constant", self.ignore_id)
+        for i, l in enumerate(text_lengths):
+            t[i, l] = self.sos
+        x_lengths = text_lengths + 1
+
+        # 2. Forward Language model
+        # x: (Batch, Length) -> y: (Batch, Length, NVocab)
+        y, _ = self.lm(x, None)
+
+
+        # 4. Calc negative log likelihood
+        # nll: (BxL,)
+        nll = F.cross_entropy(y.view(-1, y.shape[-1]), t.view(-1), reduction="none")
+
+
+        # nll: (BxL,) -> (BxL,)
+        if max_length is None:
+            nll.masked_fill_(make_pad_mask(x_lengths).to(nll.device).view(-1), 0.0)
+        else:
+            nll.masked_fill_(
+                make_pad_mask(x_lengths, maxlen=max_length + 1).to(nll.device).view(-1),
+                0.0,
+            )
+        # nll: (BxL,) -> (B, L)
+        nll = nll.view(batch_size, -1)
+
+        if doing_kd:
+            # 3. Forward internal Language model
+            # x: (Batch, Length) -> y: (Batch, Length, NVocab)
+
+            with torch.no_grad():
+                fake_encoder_out = x.new_zeros(batch_size, 1, self.encoder_output_size)
+                self.decoder.eval()
+                ilm_output, _ = self.decoder.forward_ilm(
+                    fake_encoder_out, -1, x, x_lengths
+                )
+
+                #Calc negative log likelihood for ILM
+                # nll_ilm: (BxL,)
+                nll_ilm = F.cross_entropy(ilm_output.view(-1, ilm_output.shape[-1]), t.view(-1), reduction="none")
+
+                # nll_ilm: (BxL,) -> (BxL,)
+                if max_length is None:
+                    nll_ilm.masked_fill_(make_pad_mask(x_lengths).to(nll_ilm.device).view(-1), 0.0)
+                else:
+                    nll_ilm.masked_fill_(
+                        make_pad_mask(x_lengths, maxlen=max_length + 1).to(nll_ilm.device).view(-1),
+                        0.0,
+                    )
+                # nll: (BxL,) -> (B, L)
+                nll_ilm = nll_ilm.view(batch_size, -1)
+
+
+
+                ilm_output = torch.log_softmax(ilm_output, dim=2).detach()
+                #vdebug torch.sum(torch.exp(ilm_output),dim=2)==1
+                true_dist = y.clone()
+                true_dist = true_dist.fill_(self.label_smooth / (self.vocab_size - 1))
+                ignore = t == self.ignore_id
+                target = t.masked_fill(ignore, 0)  # avoid -1 index
+                true_dist.scatter_(2, target.unsqueeze(2), 1-self.label_smooth)
+
+            lm_log_softmax=torch.log_softmax(y, dim=2)
+            lm_ilm_output=lm_log_softmax+self.kd_factor*ilm_output
+            kd_loss = self.kl_loss(torch.log_softmax(lm_ilm_output, dim=1).view(-1, self.vocab_size), true_dist.view(-1, self.vocab_size))
+            kd_loss=torch.sum(kd_loss,dim=1)
+            # kd_loss: (BxL,) -> (BxL,)
+            if max_length is None:
+                kd_loss.masked_fill_(make_pad_mask(x_lengths).to(kd_loss.device).view(-1), 0.0)
+            else:
+                kd_loss.masked_fill_(
+                    make_pad_mask(x_lengths, maxlen=max_length + 1).to(kd_loss.device).view(-1),
+                    0.0,
+                )
+            kd_loss = kd_loss.view(batch_size, -1)
+            return nll,nll_ilm,kd_loss,x_lengths
+
+        else:
+            return nll, x_lengths
+
+
+    def forward(
+        self, text: torch.Tensor, text_lengths: torch.Tensor
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        nll,nll_ilm,kd_loss, y_lengths = self.nll(text, text_lengths,doing_kd=True)
+        ntokens = y_lengths.sum()
+        nll = nll.sum() / ntokens
+        nll_ilm = nll_ilm.sum() / ntokens
+        kd_loss = kd_loss.sum() / ntokens
+        stats = dict(
+            nll=nll.detach(),
+            nll_ilm=nll_ilm.detach(),
+            kd_loss=kd_loss.detach(),
+                     )
+        loss=kd_loss+1
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss, stats, weight = force_gatherable((loss, stats, ntokens), loss.device)
+        return loss, stats, weight

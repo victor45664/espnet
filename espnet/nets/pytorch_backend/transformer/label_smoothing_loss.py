@@ -193,3 +193,6 @@ class LabelSmoothingLoss_kd(nn.Module):
             return kl_loss,kd_loss  #original loss and knowledge distilling loss
         else:
             return kl_loss
+
+
+

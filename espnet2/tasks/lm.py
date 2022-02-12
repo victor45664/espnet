@@ -13,7 +13,7 @@ from typeguard import check_argument_types
 from typeguard import check_return_type
 
 from espnet2.lm.abs_model import AbsLM
-from espnet2.lm.espnet_model import ESPnetLanguageModel
+from espnet2.lm.espnet_model import ESPnetLanguageModel,ESPnetLanguageModel_kd
 from espnet2.lm.seq_rnn_lm import SequentialRNNLM
 from espnet2.lm.transformer_lm import TransformerLM
 from espnet2.tasks.abs_task import AbsTask
@@ -28,6 +28,7 @@ from espnet2.utils.nested_dict_action import NestedDictAction
 from espnet2.utils.types import str2bool
 from espnet2.utils.types import str_or_none
 
+from espnet2.tasks.asr import decoder_choices as kd_decoder_choices
 
 lm_choices = ClassChoices(
     "lm",
@@ -205,6 +206,68 @@ class LMTask(AbsTask):
         # 2. Build ESPnetModel
         # Assume the last-id is sos_and_eos
         model = ESPnetLanguageModel(lm=lm, vocab_size=vocab_size, **args.model_conf)
+
+        # FIXME(kamo): Should be done in model?
+        # 3. Initialize
+        if args.init is not None:
+            initialize(model, args.init)
+
+        assert check_return_type(model)
+        return model
+
+
+class LMTask_kd(LMTask):
+    @classmethod
+    def add_task_arguments(cls, parser: argparse.ArgumentParser):
+        super().add_task_arguments(parser)
+        group = parser.add_argument_group(description="knowledge distilling related")
+        group.add_argument(
+            f"--kd_conf",
+            action=NestedDictAction,
+            default=dict(),
+            help=f"The keyword arguments for knowledge distilling",
+        )
+    @classmethod
+    def build_model(cls, args: argparse.Namespace) -> ESPnetLanguageModel:
+        assert check_argument_types()
+        if isinstance(args.token_list, str):
+            with open(args.token_list, encoding="utf-8") as f:
+                token_list = [line.rstrip() for line in f]
+
+            # "args" is saved as it is in a yaml file by BaseTask.main().
+            # Overwriting token_list to keep it as "portable".
+            args.token_list = token_list.copy()
+        elif isinstance(args.token_list, (tuple, list)):
+            token_list = args.token_list.copy()
+        else:
+            raise RuntimeError("token_list must be str or dict")
+
+        vocab_size = len(token_list)
+        logging.info(f"Vocabulary size: {vocab_size }")
+
+        # 1. Build LM model
+        lm_class = lm_choices.get_class(args.lm)
+        lm = lm_class(vocab_size=vocab_size, **args.lm_conf)
+
+        # 2. Build internal language model for knowledge distilling
+
+        decoder_class = kd_decoder_choices.get_class(args.kd_conf["decoder"])
+
+        decoder = decoder_class(
+            vocab_size=vocab_size,
+            encoder_output_size=args.kd_conf["encoder_output_size"],
+            **args.kd_conf["decoder_conf"],
+        )
+
+        decoder.init_ilme(args.kd_conf["ilme_conf"])  #init ilme
+
+        # 3. Build ESPnetModel
+        # Assume the last-id is sos_and_eos
+        model = ESPnetLanguageModel_kd(lm=lm,ilm_for_kd=decoder, vocab_size=vocab_size, **args.model_conf)
+        model.encoder_output_size = args.kd_conf["encoder_output_size"]
+        model.kd_factor = args.kd_conf["kd_factor"]
+        model.label_smooth = args.kd_conf["label_smooth"]
+        model.vocab_size = vocab_size
 
         # FIXME(kamo): Should be done in model?
         # 3. Initialize
