@@ -39,9 +39,11 @@ class NACL(torch.nn.Module):
 
     def __init__(self, dim):
         super(NACL, self).__init__()
-        self.psudo_ctxvector = torch.nn.Parameter(torch.empty((dim)))
+        self.psudo_ctxvector = torch.nn.Parameter(torch.zeros((dim)))
+        self.ctx_size=dim
     def forward(self, queryvector,yi):
-        return self.psudo_ctxvector
+        expand_size=list(queryvector.shape)[:-1]+[self.ctx_size]
+        return self.psudo_ctxvector.expand(expand_size)
 
 
 

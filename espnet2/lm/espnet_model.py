@@ -208,20 +208,6 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
                     fake_encoder_out, -1, x, x_lengths
                 )
 
-                #Calc negative log likelihood for ILM
-                # nll_ilm: (BxL,)
-                nll_ilm = F.cross_entropy(ilm_output.view(-1, ilm_output.shape[-1]), t.view(-1), reduction="none")
-
-                # nll_ilm: (BxL,) -> (BxL,)
-                if max_length is None:
-                    nll_ilm.masked_fill_(make_pad_mask(x_lengths).to(nll_ilm.device).view(-1), 0.0)
-                else:
-                    nll_ilm.masked_fill_(
-                        make_pad_mask(x_lengths, maxlen=max_length + 1).to(nll_ilm.device).view(-1),
-                        0.0,
-                    )
-                # nll: (BxL,) -> (B, L)
-                nll_ilm = nll_ilm.view(batch_size, -1)
 
 
 
@@ -246,7 +232,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
                     0.0,
                 )
             kd_loss = kd_loss.view(batch_size, -1)
-            return nll,nll_ilm,kd_loss,x_lengths
+            return nll,kd_loss,x_lengths
 
         else:
             return nll, x_lengths
@@ -255,14 +241,12 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
     def forward(
         self, text: torch.Tensor, text_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
-        nll,nll_ilm,kd_loss, y_lengths = self.nll(text, text_lengths,doing_kd=True)
+        nll,kd_loss, y_lengths = self.nll(text, text_lengths,doing_kd=True)
         ntokens = y_lengths.sum()
         nll = nll.sum() / ntokens
-        nll_ilm = nll_ilm.sum() / ntokens
         kd_loss = kd_loss.sum() / ntokens
         stats = dict(
             nll=nll.detach(),
-            nll_ilm=nll_ilm.detach(),
             kd_loss=kd_loss.detach(),
                      )
         loss=kd_loss+1
