@@ -260,7 +260,8 @@ class LMTask_kd(LMTask):
         )
 
         decoder.init_ilme(args.kd_conf["ilme_conf"])  #init ilme
-
+        for p in decoder.ilme_parameter:
+            p.requires_grad=False
         # 3. Build ESPnetModel
         # Assume the last-id is sos_and_eos
         model = ESPnetLanguageModel_kd(lm=lm,ilm_for_kd=decoder, vocab_size=vocab_size, **args.model_conf)

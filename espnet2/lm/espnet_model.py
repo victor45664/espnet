@@ -5,7 +5,7 @@ from typing import Tuple
 import torch
 import torch.nn.functional as F
 from typeguard import check_argument_types
-
+from espnet.nets.pytorch_backend.nets_utils import th_accuracy
 from espnet.nets.pytorch_backend.nets_utils import make_pad_mask
 from espnet2.lm.abs_model import AbsLM
 from espnet2.torch_utils.device_funcs import force_gatherable
@@ -196,7 +196,11 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
             )
         # nll: (BxL,) -> (B, L)
         nll = nll.view(batch_size, -1)
-
+        lm_acc = th_accuracy(
+            y.view(-1, self.vocab_size),
+            t,
+            ignore_label=self.ignore_id,
+        )
         if doing_kd:
             # 3. Forward internal Language model
             # x: (Batch, Length) -> y: (Batch, Length, NVocab)
@@ -221,8 +225,13 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
 
             lm_log_softmax=torch.log_softmax(y, dim=2)
             lm_ilm_output=lm_log_softmax+self.kd_factor*ilm_output
-            kd_loss = self.kl_loss(torch.log_softmax(lm_ilm_output, dim=1).view(-1, self.vocab_size), true_dist.view(-1, self.vocab_size))
+            kd_loss = self.kl_loss(torch.log_softmax(lm_ilm_output, dim=2).view(-1, self.vocab_size), true_dist.view(-1, self.vocab_size))
             kd_loss=torch.sum(kd_loss,dim=1)
+            lm_ilm_acc = th_accuracy(
+                lm_ilm_output.view(-1, self.vocab_size),
+                t,
+                ignore_label=self.ignore_id,
+            )
             # kd_loss: (BxL,) -> (BxL,)
             if max_length is None:
                 kd_loss.masked_fill_(make_pad_mask(x_lengths).to(kd_loss.device).view(-1), 0.0)
@@ -250,7 +259,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
 
 
 
-            return nll,kd_nll,kd_loss,x_lengths
+            return nll,lm_acc,kd_nll,lm_ilm_acc,kd_loss,x_lengths
 
         else:
             return nll, x_lengths
@@ -259,7 +268,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
     def forward(
         self, text: torch.Tensor, text_lengths: torch.Tensor
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
-        nll,kd_nll,kd_loss, y_lengths = self.nll(text, text_lengths,doing_kd=True)
+        nll,lm_acc,kd_nll,lm_ilm_acc,kd_loss, y_lengths = self.nll(text, text_lengths,doing_kd=True)
         ntokens = y_lengths.sum()
         nll = nll.sum() / ntokens
         kd_nll = kd_nll.sum() / ntokens
@@ -268,6 +277,8 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
             nll=nll.detach(),
             kd_nll=kd_nll.detach(),
             kd_loss=kd_loss.detach(),
+            lm_ilm_acc=lm_ilm_acc,
+            lm_acc=lm_acc,
                      )
         loss=kd_loss+1
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
