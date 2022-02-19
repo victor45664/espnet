@@ -1,7 +1,7 @@
 
 import torch
 import sys
-
+#remove the ilm from lmkd trained model
 
 pth_path=sys.argv[1]
 

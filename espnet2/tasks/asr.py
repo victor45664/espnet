@@ -909,6 +909,10 @@ class ASRTask_ilme_unadl(ASRTask):
             def parameters(self):
                 return self.para
 
+        if "freeze_dropout" not in args.ilme_conf or args.ilme_conf["freeze_dropout"]==False: #默认不关闭dropout
+            cls.trainer.freeze_dropout=False
+        else:
+            cls.trainer.freeze_dropout = True   #关闭dropout可以保证LAS反向和ILM反向的时候，拓扑一致
 
         if "freeze_encoder" not in args.ilme_conf or args.ilme_conf["freeze_encoder"]==True: #默认冻结encoder参数
             mymodel = fakemodel(list(model.decoder.parameters())) #一个只含有decoder参数的假model，用于指定更新哪些参数，自然包括ilme的参数

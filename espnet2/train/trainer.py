@@ -1718,6 +1718,11 @@ class Trainer_ilme_unadl(Trainer):
                 model.module.encoder.eval()
             else:
                 model.encoder.eval()
+        if cls.freeze_dropout:
+            if isinstance(model,torch.nn.DataParallel):
+                model.module.decoder.eval()
+            else:
+                model.decoder.eval()
 
         all_steps_are_invalid = True
         # [For distributed] Because iteration counts are not always equals between
