@@ -712,9 +712,9 @@ class ESPnetASRModel_unadl(ESPnetASRModel):
             == text_lengths.shape[0]
         ), (text.shape, text_lengths.shape)
         batch_size = text.shape[0]
-
+        max_T=text_lengths.max()
         # for data-parallel
-        text = text[:, : text_lengths.max()]
+        text = text[:, : max_T]
 
         ys_in_pad, ys_out_pad = add_sos_eos(text, self.sos, self.eos, self.ignore_id)
         ys_in_lens = text_lengths + 1
@@ -733,14 +733,36 @@ class ESPnetASRModel_unadl(ESPnetASRModel):
             ignore_label=self.ignore_id,
         )
 
+        if self.rd_aug_text:
+            with torch.no_grad():
+
+                aug_mask=torch.rand([self.rd_aug_text_times*batch_size,max_T+1],device=ys_in_pad.device)<=self.rd_aug_text_p
+                aug_mask[:,0]=0  #不要修改sos
+                rand_ins=torch.randint(0,self.vocab_size-1,[self.rd_aug_text_times*batch_size,max_T+1],device=ys_in_pad.device)
+                rand_ins=rand_ins*aug_mask
+                rand_ins=rand_ins.type(ys_in_pad.dtype)
+
+                ys_in_pad_rd_aug=torch.remainder(rand_ins+ys_in_pad.repeat(self.rd_aug_text_times, 1), self.vocab_size)#进行文本数据增强，通过按概率替换其中的token实现
+
+
+            decoder_out_rd_aug, _ = self.decoder.forward_ilm(
+                fake_encoder_out, -1, ys_in_pad_rd_aug, ys_in_lens.repeat([self.rd_aug_text_times])
+            )
+            unadl_loss_aug=self.criterion_att.forward_unadl(decoder_out_rd_aug, ys_out_pad.repeat([self.rd_aug_text_times,1]))
+
+
         loss=loss_ilm+1 #make sure
-        unadl_loss_cp=unadl_loss+1
+
         stats = dict(
             ilm_loss=loss_ilm.detach(),
             unadl_loss=unadl_loss.detach(),
             ilm_acc=ilm_acc,
         )
-
+        if self.rd_aug_text:
+            stats['unadl_loss_aug'] = unadl_loss_aug.detach()
+            unadl_loss_cp = (unadl_loss + unadl_loss_aug * self.rd_aug_text_times) / (self.rd_aug_text_times + 1)
+        else:
+            unadl_loss_cp=unadl_loss+1
         # force_gatherable: to-device and to-tensor if scalar for DataParallel
         loss,unadl_loss_cp, stats, weight = force_gatherable((loss,unadl_loss_cp, stats, batch_size), loss.device)
         return loss,unadl_loss_cp, stats, weight

@@ -896,8 +896,8 @@ class ASRTask_ilme_unadl(ASRTask):
             model.rd_aug_text=False
         else:
             model.rd_aug_text = True
-            model.rd_aug_text=args.ilme_conf["rd_aug_text_times"]  #数据增量的倍率
-            model.rd_aug_text=args.ilme_conf["rd_aug_text_p"]  #随机修改的概率
+            model.rd_aug_text_times=args.ilme_conf["rd_aug_text_times"]  #数据增量的倍率
+            model.rd_aug_text_p=args.ilme_conf["rd_aug_text_p"]  #随机修改的概率
         assert check_return_type(model)
         return model
 
