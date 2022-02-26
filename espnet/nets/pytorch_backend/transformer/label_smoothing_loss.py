@@ -94,7 +94,7 @@ class LabelSmoothingLoss_unadl(nn.Module):
         self.size = size
         self.true_dist = None
         self.normalize_length = normalize_length
-
+        self.un_dist=torch.nn.Parameter(1/size*torch.ones((size)),requires_grad=False)
     def forward(self, x, target,adl_loss=False):
         """Compute loss between x and target.
 
@@ -106,20 +106,20 @@ class LabelSmoothingLoss_unadl(nn.Module):
         """
         assert x.size(2) == self.size
         batch_size = x.size(0)
+        T = x.size(1)
         x = x.view(-1, self.size)
         target = target.view(-1)
         if adl_loss:
             with torch.no_grad():
                 true_dist = x.clone()
-                un_dist = x.clone()
                 ignore = target == self.padding_idx  # (B,)
                 total = len(target) - ignore.sum().item()
                 target = target.masked_fill(ignore, 0)  # avoid -1 index
                 true_dist.fill_(self.smoothing / (self.size - 1))
                 true_dist.scatter_(1, target.unsqueeze(1), self.confidence)
-                un_dist.fill_(1 / self.size)
+
             kl = self.criterion(torch.log_softmax(x, dim=1), true_dist)
-            un_adl_loss=self.criterion(torch.log_softmax(x, dim=1), un_dist)
+            un_adl_loss=self.criterion(torch.log_softmax(x, dim=1), self.un_dist.expand([batch_size*T,self.size]))
             denom = total if self.normalize_length else batch_size
             return kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom,un_adl_loss.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
         else:
@@ -133,6 +133,25 @@ class LabelSmoothingLoss_unadl(nn.Module):
             kl = self.criterion(torch.log_softmax(x, dim=1), true_dist)
             denom = total if self.normalize_length else batch_size
             return kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
+
+    def forward_unadl(self, x,target):
+        """Compute loss between x and uniform distribution.
+
+        """
+        assert x.size(2) == self.size
+        batch_size = x.size(0)
+        T = x.size(1)
+        x = x.view(-1, self.size)
+        target = target.view(-1)
+
+        with torch.no_grad():
+            ignore = target == self.padding_idx  # (B,)
+            total = len(target) - ignore.sum().item()
+            un_adl_loss=self.criterion(torch.log_softmax(x, dim=1), self.un_dist.expand([batch_size*T,self.size]))
+            denom = total if self.normalize_length else batch_size
+            return un_adl_loss.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
+
+
 
 class LabelSmoothingLoss_kd(nn.Module):
     """Label-smoothing loss.

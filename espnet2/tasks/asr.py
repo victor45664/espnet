@@ -892,6 +892,12 @@ class ASRTask_ilme_unadl(ASRTask):
                              )
         model.adl_begin_loss=args.ilme_conf["adl_begin_loss"]
         model.adl_factor=args.ilme_conf["adl_factor"]
+        if "rd_aug_text" not in args.ilme_conf or args.ilme_conf["rd_aug_text"]==False: #默认关闭不使用随机文本增强
+            model.rd_aug_text=False
+        else:
+            model.rd_aug_text = True
+            model.rd_aug_text=args.ilme_conf["rd_aug_text_times"]  #数据增量的倍率
+            model.rd_aug_text=args.ilme_conf["rd_aug_text_p"]  #随机修改的概率
         assert check_return_type(model)
         return model
 
