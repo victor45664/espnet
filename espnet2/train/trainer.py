@@ -58,6 +58,15 @@ try:
 except ImportError:
     fairscale = None
 
+def freeze_encoder(model):
+    if isinstance(model, torch.nn.DataParallel):
+        encoder=model.module.encoder
+    else:
+        encoder=model.encoder
+    for child in encoder.modules():
+        if isinstance(child,torch.nn.BatchNorm1d):  #需要固定BN层，因为训练的时候batch_size比较小，会导致BN层统计不准
+            child.eval()
+
 
 @dataclasses.dataclass
 class TrainerOptions:
@@ -1661,6 +1670,10 @@ class Trainer_ilme_adl(Trainer):
 
 
 class Trainer_ilme_unadl(Trainer):
+
+
+
+
     decoder_parameter_switch = 0  # it is almost certain that adl training should not begin adl training at once
     @classmethod
     def train_one_epoch(
@@ -1714,10 +1727,7 @@ class Trainer_ilme_unadl(Trainer):
                 log_interval = 100
         model.train()
         if cls.freeze_encoder:
-            if isinstance(model,torch.nn.DataParallel):
-                model.module.encoder.eval()
-            else:
-                model.encoder.eval()
+            freeze_encoder(model)
         if cls.freeze_dropout:
             if isinstance(model,torch.nn.DataParallel):
                 model.module.decoder.eval()
