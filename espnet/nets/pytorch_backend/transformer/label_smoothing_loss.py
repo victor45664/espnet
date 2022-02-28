@@ -94,7 +94,7 @@ class LabelSmoothingLoss_unadl(nn.Module):
         self.size = size
         self.true_dist = None
         self.normalize_length = normalize_length
-        self.un_dist=torch.nn.Parameter(1/size*torch.ones((size)),requires_grad=False)
+        self.un_dist=1/size*torch.ones((size),requires_grad=False)
     def forward(self, x, target,adl_loss=False):
         """Compute loss between x and target.
 
