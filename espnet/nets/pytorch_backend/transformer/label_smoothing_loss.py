@@ -37,7 +37,7 @@ class LabelSmoothingLoss(nn.Module):
         self.size = size
         self.true_dist = None
         self.normalize_length = normalize_length
-        self.un_dist = torch.nn.Parameter(1 / size * torch.ones((size)), requires_grad=False) #for compatibility with LabelSmoothingLoss_kd
+
     def forward(self, x, target):
         """Compute loss between x and target.
 
