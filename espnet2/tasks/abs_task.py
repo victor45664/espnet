@@ -1326,4 +1326,499 @@ class AbsTask(ABC):
         if mode == "train":
             preprocess_fn = cls.build_preprocess_fn(args, train=True)
             collate_fn = cls.build_collate_fn(args, train=True)
-            data_path_and_name_and_type
+            data_path_and_name_and_type = args.train_data_path_and_name_and_type
+            shape_files = args.train_shape_file
+            batch_size = args.batch_size
+            batch_bins = args.batch_bins
+            batch_type = args.batch_type
+            max_cache_size = args.max_cache_size
+            max_cache_fd = args.max_cache_fd
+            distributed = distributed_option.distributed
+            num_batches = None
+            num_iters_per_epoch = args.num_iters_per_epoch
+            train = True
+
+        elif mode == "valid":
+            preprocess_fn = cls.build_preprocess_fn(args, train=False)
+            collate_fn = cls.build_collate_fn(args, train=False)
+            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            shape_files = args.valid_shape_file
+
+            if args.valid_batch_type is None:
+                batch_type = args.batch_type
+            else:
+                batch_type = args.valid_batch_type
+            if args.valid_batch_size is None:
+                batch_size = args.batch_size
+            else:
+                batch_size = args.valid_batch_size
+            if args.valid_batch_bins is None:
+                batch_bins = args.batch_bins
+            else:
+                batch_bins = args.valid_batch_bins
+            if args.valid_max_cache_size is None:
+                # Cache 5% of maximum size for validation loader
+                max_cache_size = 0.05 * args.max_cache_size
+            else:
+                max_cache_size = args.valid_max_cache_size
+            max_cache_fd = args.max_cache_fd
+            distributed = distributed_option.distributed
+            num_batches = None
+            num_iters_per_epoch = None
+            train = False
+
+        elif mode == "plot_att":
+            preprocess_fn = cls.build_preprocess_fn(args, train=False)
+            collate_fn = cls.build_collate_fn(args, train=False)
+            data_path_and_name_and_type = args.valid_data_path_and_name_and_type
+            shape_files = args.valid_shape_file
+            batch_type = "unsorted"
+            batch_size = 1
+            batch_bins = 0
+            num_batches = args.num_att_plot
+            max_cache_fd = args.max_cache_fd
+            # num_att_plot should be a few sample ~ 3, so cache all data.
+            max_cache_size = np.inf if args.max_cache_size != 0.0 else 0.0
+            # always False because plot_attention performs on RANK0
+            distributed = False
+            num_iters_per_epoch = None
+            train = False
+        else:
+            raise NotImplementedError(f"mode={mode}")
+
+        return IteratorOptions(
+            preprocess_fn=preprocess_fn,
+            collate_fn=collate_fn,
+            data_path_and_name_and_type=data_path_and_name_and_type,
+            shape_files=shape_files,
+            batch_type=batch_type,
+            batch_size=batch_size,
+            batch_bins=batch_bins,
+            num_batches=num_batches,
+            max_cache_size=max_cache_size,
+            max_cache_fd=max_cache_fd,
+            distributed=distributed,
+            num_iters_per_epoch=num_iters_per_epoch,
+            train=train,
+        )
+
+    @classmethod
+    def build_iter_factory(
+        cls,
+        args: argparse.Namespace,
+        distributed_option: DistributedOption,
+        mode: str,
+        kwargs: dict = None,
+    ) -> AbsIterFactory:
+        """Build a factory object of mini-batch iterator.
+
+        This object is invoked at every epochs to build the iterator for each epoch
+        as following:
+
+        >>> iter_factory = cls.build_iter_factory(...)
+        >>> for epoch in range(1, max_epoch):
+        ...     for keys, batch in iter_fatory.build_iter(epoch):
+        ...         model(**batch)
+
+        The mini-batches for each epochs are fully controlled by this class.
+        Note that the random seed used for shuffling is decided as "seed + epoch" and
+        the generated mini-batches can be reproduces when resuming.
+
+        Note that the definition of "epoch" doesn't always indicate
+        to run out of the whole training corpus.
+        "--num_iters_per_epoch" option restricts the number of iterations for each epoch
+        and the rest of samples for the originally epoch are left for the next epoch.
+        e.g. If The number of mini-batches equals to 4, the following two are same:
+
+        - 1 epoch without "--num_iters_per_epoch"
+        - 4 epoch with "--num_iters_per_epoch" == 4
+
+        """
+        assert check_argument_types()
+        iter_options = cls.build_iter_options(args, distributed_option, mode)
+
+        # Overwrite iter_options if any kwargs is given
+        if kwargs is not None:
+            for k, v in kwargs.items():
+                setattr(iter_options, k, v)
+
+        if args.iterator_type == "sequence":
+            return cls.build_sequence_iter_factory(
+                args=args,
+                iter_options=iter_options,
+                mode=mode,
+            )
+        elif args.iterator_type == "chunk":
+            return cls.build_chunk_iter_factory(
+                args=args,
+                iter_options=iter_options,
+                mode=mode,
+            )
+        elif args.iterator_type == "task":
+            return cls.build_task_iter_factory(
+                args=args,
+                iter_options=iter_options,
+                mode=mode,
+            )
+        else:
+            raise RuntimeError(f"Not supported: iterator_type={args.iterator_type}")
+
+    @classmethod
+    def build_sequence_iter_factory(
+        cls, args: argparse.Namespace, iter_options: IteratorOptions, mode: str
+    ) -> AbsIterFactory:
+        assert check_argument_types()
+
+        dataset = ESPnetDataset(
+            iter_options.data_path_and_name_and_type,
+            float_dtype=args.train_dtype,
+            preprocess=iter_options.preprocess_fn,
+            max_cache_size=iter_options.max_cache_size,
+            max_cache_fd=iter_options.max_cache_fd,
+        )
+        cls.check_task_requirements(
+            dataset, args.allow_variable_data_keys, train=iter_options.train
+        )
+
+        if Path(
+            Path(iter_options.data_path_and_name_and_type[0][0]).parent, "utt2category"
+        ).exists():
+            utt2category_file = str(
+                Path(
+                    Path(iter_options.data_path_and_name_and_type[0][0]).parent,
+                    "utt2category",
+                )
+            )
+        else:
+            utt2category_file = None
+        batch_sampler = build_batch_sampler(
+            type=iter_options.batch_type,
+            shape_files=iter_options.shape_files,
+            fold_lengths=args.fold_length,
+            batch_size=iter_options.batch_size,
+            batch_bins=iter_options.batch_bins,
+            sort_in_batch=args.sort_in_batch,
+            sort_batch=args.sort_batch,
+            drop_last=False,
+            min_batch_size=torch.distributed.get_world_size()
+            if iter_options.distributed
+            else 1,
+            utt2category_file=utt2category_file,
+        )
+
+        batches = list(batch_sampler)
+        if iter_options.num_batches is not None:
+            batches = batches[: iter_options.num_batches]
+
+        bs_list = [len(batch) for batch in batches]
+
+        logging.info(f"[{mode}] dataset:\n{dataset}")
+        logging.info(f"[{mode}] Batch sampler: {batch_sampler}")
+        logging.info(
+            f"[{mode}] mini-batch sizes summary: N-batch={len(bs_list)}, "
+            f"mean={np.mean(bs_list):.1f}, min={np.min(bs_list)}, max={np.max(bs_list)}"
+        )
+
+        if iter_options.distributed:
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+            for batch in batches:
+                if len(batch) < world_size:
+                    raise RuntimeError(
+                        f"The batch-size must be equal or more than world_size: "
+                        f"{len(batch)} < {world_size}"
+                    )
+            batches = [batch[rank::world_size] for batch in batches]
+
+        return SequenceIterFactory(
+            dataset=dataset,
+            batches=batches,
+            seed=args.seed,
+            num_iters_per_epoch=iter_options.num_iters_per_epoch,
+            shuffle=iter_options.train,
+            num_workers=args.num_workers,
+            collate_fn=iter_options.collate_fn,
+            pin_memory=args.ngpu > 0,
+        )
+
+    @classmethod
+    def build_chunk_iter_factory(
+        cls,
+        args: argparse.Namespace,
+        iter_options: IteratorOptions,
+        mode: str,
+    ) -> AbsIterFactory:
+        assert check_argument_types()
+
+        dataset = ESPnetDataset(
+            iter_options.data_path_and_name_and_type,
+            float_dtype=args.train_dtype,
+            preprocess=iter_options.preprocess_fn,
+            max_cache_size=iter_options.max_cache_size,
+            max_cache_fd=iter_options.max_cache_fd,
+        )
+        cls.check_task_requirements(
+            dataset, args.allow_variable_data_keys, train=iter_options.train
+        )
+
+        if len(iter_options.shape_files) == 0:
+            key_file = iter_options.data_path_and_name_and_type[0][0]
+        else:
+            key_file = iter_options.shape_files[0]
+
+        batch_sampler = UnsortedBatchSampler(batch_size=1, key_file=key_file)
+        batches = list(batch_sampler)
+        if iter_options.num_batches is not None:
+            batches = batches[: iter_options.num_batches]
+        logging.info(f"[{mode}] dataset:\n{dataset}")
+
+        if iter_options.distributed:
+            world_size = torch.distributed.get_world_size()
+            rank = torch.distributed.get_rank()
+            if len(batches) < world_size:
+                raise RuntimeError("Number of samples is smaller than world_size")
+            if iter_options.batch_size < world_size:
+                raise RuntimeError("batch_size must be equal or more than world_size")
+
+            if rank < iter_options.batch_size % world_size:
+                batch_size = iter_options.batch_size // world_size + 1
+            else:
+                batch_size = iter_options.batch_size // world_size
+            num_cache_chunks = args.num_cache_chunks // world_size
+            # NOTE(kamo): Split whole corpus by sample numbers without considering
+            #   each of the lengths, therefore the number of iteration counts are not
+            #   always equal to each other and the iterations are limitted
+            #   by the fewest iterations.
+            #   i.e. the samples over the counts are discarded.
+            batches = batches[rank::world_size]
+        else:
+            batch_size = iter_options.batch_size
+            num_cache_chunks = args.num_cache_chunks
+
+        return ChunkIterFactory(
+            dataset=dataset,
+            batches=batches,
+            seed=args.seed,
+            batch_size=batch_size,
+            # For chunk iterator,
+            # --num_iters_per_epoch doesn't indicate the number of iterations,
+            # but indicates the number of samples.
+            num_samples_per_epoch=iter_options.num_iters_per_epoch,
+            shuffle=iter_options.train,
+            num_workers=args.num_workers,
+            collate_fn=iter_options.collate_fn,
+            pin_memory=args.ngpu > 0,
+            chunk_length=args.chunk_length,
+            chunk_shift_ratio=args.chunk_shift_ratio,
+            num_cache_chunks=num_cache_chunks,
+        )
+
+    # NOTE(kamo): Not abstract class
+    @classmethod
+    def build_task_iter_factory(
+        cls,
+        args: argparse.Namespace,
+        iter_options: IteratorOptions,
+        mode: str,
+    ) -> AbsIterFactory:
+        """Build task specific iterator factory
+
+        Example:
+
+            >>> class YourTask(AbsTask):
+            ... @classmethod
+            ... def add_task_arguments(cls, parser: argparse.ArgumentParser):
+            ...     parser.set_defaults(iterator_type="task")
+            ...
+            ... @classmethod
+            ... def build_task_iter_factory(
+            ...     cls,
+            ...     args: argparse.Namespace,
+            ...     iter_options: IteratorOptions,
+            ...     mode: str,
+            ... ):
+            ...     return FooIterFactory(...)
+            ...
+            ... @classmethod
+            ... def build_iter_options(
+            ....    args: argparse.Namespace,
+            ...     distributed_option: DistributedOption,
+            ...     mode: str
+            ... ):
+            ...     # if you need to customize options object
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def build_multiple_iter_factory(
+        cls, args: argparse.Namespace, distributed_option: DistributedOption, mode: str
+    ):
+        assert check_argument_types()
+        iter_options = cls.build_iter_options(args, distributed_option, mode)
+        assert len(iter_options.data_path_and_name_and_type) > 0, len(
+            iter_options.data_path_and_name_and_type
+        )
+
+        # 1. Sanity check
+        num_splits = None
+        for path in [
+            path for path, _, _ in iter_options.data_path_and_name_and_type
+        ] + list(iter_options.shape_files):
+            if not Path(path).is_dir():
+                raise RuntimeError(f"{path} is not a directory")
+            p = Path(path) / "num_splits"
+            if not p.exists():
+                raise FileNotFoundError(f"{p} is not found")
+            with p.open() as f:
+                _num_splits = int(f.read())
+                if num_splits is not None and num_splits != _num_splits:
+                    raise RuntimeError(
+                        f"Number of splits are mismathed: "
+                        f"{iter_options.data_path_and_name_and_type[0][0]} and {path}"
+                    )
+                num_splits = _num_splits
+
+            for i in range(num_splits):
+                p = Path(path) / f"split.{i}"
+                if not p.exists():
+                    raise FileNotFoundError(f"{p} is not found")
+
+        # 2. Create functions to build an iter factory for each splits
+        data_path_and_name_and_type_list = [
+            [
+                (str(Path(p) / f"split.{i}"), n, t)
+                for p, n, t in iter_options.data_path_and_name_and_type
+            ]
+            for i in range(num_splits)
+        ]
+        shape_files_list = [
+            [str(Path(s) / f"split.{i}") for s in iter_options.shape_files]
+            for i in range(num_splits)
+        ]
+        num_iters_per_epoch_list = [
+            (iter_options.num_iters_per_epoch + i) // num_splits
+            if iter_options.num_iters_per_epoch is not None
+            else None
+            for i in range(num_splits)
+        ]
+        max_cache_size = iter_options.max_cache_size / num_splits
+
+        # Note that iter-factories are built for each epoch at runtime lazily.
+        build_funcs = [
+            functools.partial(
+                cls.build_iter_factory,
+                args,
+                distributed_option,
+                mode,
+                kwargs=dict(
+                    data_path_and_name_and_type=_data_path_and_name_and_type,
+                    shape_files=_shape_files,
+                    num_iters_per_epoch=_num_iters_per_epoch,
+                    max_cache_size=max_cache_size,
+                ),
+            )
+            for (
+                _data_path_and_name_and_type,
+                _shape_files,
+                _num_iters_per_epoch,
+            ) in zip(
+                data_path_and_name_and_type_list,
+                shape_files_list,
+                num_iters_per_epoch_list,
+            )
+        ]
+
+        # 3. Build MultipleIterFactory
+        return MultipleIterFactory(
+            build_funcs=build_funcs, shuffle=iter_options.train, seed=args.seed
+        )
+
+    @classmethod
+    def build_streaming_iterator(
+        cls,
+        data_path_and_name_and_type,
+        preprocess_fn,
+        collate_fn,
+        key_file: str = None,
+        batch_size: int = 1,
+        dtype: str = np.float32,
+        num_workers: int = 1,
+        allow_variable_data_keys: bool = False,
+        ngpu: int = 0,
+        inference: bool = False,
+    ) -> DataLoader:
+        """Build DataLoader using iterable dataset"""
+        assert check_argument_types()
+        # For backward compatibility for pytorch DataLoader
+        if collate_fn is not None:
+            kwargs = dict(collate_fn=collate_fn)
+        else:
+            kwargs = {}
+
+        dataset = IterableESPnetDataset(
+            data_path_and_name_and_type,
+            float_dtype=dtype,
+            preprocess=preprocess_fn,
+            key_file=key_file,
+        )
+        if dataset.apply_utt2category:
+            kwargs.update(batch_size=1)
+        else:
+            kwargs.update(batch_size=batch_size)
+
+        cls.check_task_requirements(
+            dataset, allow_variable_data_keys, train=False, inference=inference
+        )
+
+        return DataLoader(
+            dataset=dataset,
+            pin_memory=ngpu > 0,
+            num_workers=num_workers,
+            **kwargs,
+        )
+
+    # ~~~~~~~~~ The methods below are mainly used for inference ~~~~~~~~~
+    @classmethod
+    def build_model_from_file(
+        cls,
+        config_file: Union[Path, str] = None,
+        model_file: Union[Path, str] = None,
+        device: str = "cpu",
+    ) -> Tuple[AbsESPnetModel, argparse.Namespace]:
+        """Build model from the files.
+
+        This method is used for inference or fine-tuning.
+
+        Args:
+            config_file: The yaml file saved when training.
+            model_file: The model file saved when training.
+            device: Device type, "cpu", "cuda", or "cuda:N".
+
+        """
+        assert check_argument_types()
+        if config_file is None:
+            assert model_file is not None, (
+                "The argument 'model_file' must be provided "
+                "if the argument 'config_file' is not specified."
+            )
+            config_file = Path(model_file).parent / "config.yaml"
+        else:
+            config_file = Path(config_file)
+
+        with config_file.open("r", encoding="utf-8") as f:
+            args = yaml.safe_load(f)
+        args = argparse.Namespace(**args)
+        model = cls.build_model(args)
+        if not isinstance(model, AbsESPnetModel):
+            raise RuntimeError(
+                f"model must inherit {AbsESPnetModel.__name__}, but got {type(model)}"
+            )
+        model.to(device)
+        if model_file is not None:
+            if device == "cuda":
+                # NOTE(kamo): "cuda" for torch.load always indicates cuda:0
+                #   in PyTorch<=1.4
+                device = f"cuda:{torch.cuda.current_device()}"
+            model.load_state_dict(torch.load(model_file, map_location=device),strict=False)
+
+        return model, args
