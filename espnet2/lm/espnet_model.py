@@ -138,7 +138,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
         assert check_argument_types()
         super(ESPnetLanguageModel, self).__init__()
         self.lm = lm
-        self.lm_parameters=self.parameters()  #parameters in lm model
+        self.lm_parameters=list(self.parameters())  #parameters in lm model
         self.lm_kd=copy.deepcopy(lm)  #从训练好的lm中初始化的语言模型，这个模型是不会被训练的,只是复制结构，参数之后会正确初始化
         self.decoder=ilm_for_kd   #这里加decoder是为了方便 从asr模型的参数中初始化
         self.decoder.eval()       #ILM 应该始终保持eval模式
@@ -241,7 +241,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
                 )
                 # 4. Calc negative log likelihood
                 # nll: (BxL,)
-                kd_nll = F.cross_entropy(torch.softmax(lm_ilm_sum,dim=2).view(-1, y.shape[-1]), t.view(-1), reduction="none")
+                kd_nll = F.cross_entropy(lm_ilm_sum.view(-1, y.shape[-1]), t.view(-1), reduction="none")
 
                 # nll: (BxL,) -> (BxL,)
                 if max_length is None:
