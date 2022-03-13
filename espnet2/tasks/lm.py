@@ -265,6 +265,9 @@ class LMTask_kd(LMTask):
         # 3. Build ESPnetModel
         # Assume the last-id is sos_and_eos
         model = ESPnetLanguageModel_kd(lm=lm,ilm_for_kd=decoder, vocab_size=vocab_size, **args.model_conf)
+
+
+
         model.encoder_output_size = args.kd_conf["encoder_output_size"]
         model.kd_factor = args.kd_conf["kd_factor"]
         model.label_smooth = args.kd_conf["label_smooth"]
@@ -275,5 +278,36 @@ class LMTask_kd(LMTask):
         if args.init is not None:
             initialize(model, args.init)
 
+
+        #load kdlm 读取用于进行知识蒸馏的语言模型，这个模型在整个训练过程中 保持不变
+        kdlm_dict = torch.load(args.kd_conf["kdlm_init"], map_location="cpu")
+        kdlm_dict = {k[3:]: v for k, v in kdlm_dict.items()}
+        model.lm_kd.load_state_dict(kdlm_dict)
+
+        for p in model.lm_kd.parameters():
+            p.requires_grad=False
+        for p in model.decoder.parameters():
+            p.requires_grad=False
         assert check_return_type(model)
         return model
+
+
+
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        class fakemodel(object):
+            #假模型，用于替换parameters
+            def __init__(self,para):
+                self.para=para
+            def parameters(self):
+                return self.para
+
+
+        mymodel=fakemodel(model.lm_parameters)  #一个只含有parameters的假model，用于指定更新哪些参数
+        optimizers = super().build_optimizers(args,mymodel)
+
+        return optimizers

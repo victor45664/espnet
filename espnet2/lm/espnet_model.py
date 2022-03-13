@@ -11,7 +11,7 @@ from espnet2.lm.abs_model import AbsLM
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
 from espnet.nets.pytorch_backend.transformer.label_smoothing_loss import LabelSmoothingLoss_kd
-
+import copy
 class ESPnetLanguageModel(AbsESPnetModel):
     def __init__(self, lm: AbsLM, vocab_size: int, ignore_id: int = 0):
         assert check_argument_types()
@@ -139,6 +139,7 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
         super(ESPnetLanguageModel, self).__init__()
         self.lm = lm
         self.lm_parameters=self.parameters()  #parameters in lm model
+        self.lm_kd=copy.deepcopy(lm)  #从训练好的lm中初始化的语言模型，这个模型是不会被训练的,只是复制结构，参数之后会正确初始化
         self.decoder=ilm_for_kd   #这里加decoder是为了方便 从asr模型的参数中初始化
         self.decoder.eval()       #ILM 应该始终保持eval模式
         self.sos = vocab_size - 1
@@ -211,27 +212,17 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
                 ilm_output, _ = self.decoder.forward_ilm(
                     fake_encoder_out, -1, x, x_lengths
                 )
-
-
-
-
                 ilm_output = torch.log_softmax(ilm_output, dim=2).detach()
                 #vdebug torch.sum(torch.exp(ilm_output),dim=2)==1
-                true_dist = y.clone()
-                true_dist = true_dist.fill_(self.label_smooth / (self.vocab_size - 1))
-                ignore = t == self.ignore_id
-                target = t.masked_fill(ignore, 0)  # avoid -1 index
-                true_dist.scatter_(2, target.unsqueeze(2), 1-self.label_smooth)
+
+                y_lm_kd, _ = self.lm_kd(x, None)
+                y_lm_kd=torch.log_softmax(y_lm_kd, dim=2)
+                teacher_label =torch.softmax( y_lm_kd - self.kd_factor * ilm_output,dim=2)  # log相加后概率不是归一化的
 
             lm_log_softmax=torch.log_softmax(y, dim=2)
-            lm_ilm_output=lm_log_softmax+self.kd_factor*ilm_output
-            kd_loss = self.kl_loss(torch.log_softmax(lm_ilm_output, dim=2).view(-1, self.vocab_size), true_dist.view(-1, self.vocab_size))
+            kd_loss = self.kl_loss(lm_log_softmax.view(-1, self.vocab_size), teacher_label.view(-1, self.vocab_size))
             kd_loss=torch.sum(kd_loss,dim=1)
-            lm_ilm_acc = th_accuracy(
-                lm_ilm_output.view(-1, self.vocab_size),
-                t,
-                ignore_label=self.ignore_id,
-            )
+
             # kd_loss: (BxL,) -> (BxL,)
             if max_length is None:
                 kd_loss.masked_fill_(make_pad_mask(x_lengths).to(kd_loss.device).view(-1), 0.0)
@@ -242,9 +233,15 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
                 )
             kd_loss = kd_loss.view(batch_size, -1)
             with torch.no_grad():
+                lm_ilm_sum=lm_log_softmax + self.kd_factor * ilm_output
+                lm_ilm_acc = th_accuracy(
+                    lm_ilm_sum.view(-1, self.vocab_size),
+                    t,
+                    ignore_label=self.ignore_id,
+                )
                 # 4. Calc negative log likelihood
                 # nll: (BxL,)
-                kd_nll = F.cross_entropy(lm_ilm_output.view(-1, y.shape[-1]), t.view(-1), reduction="none")
+                kd_nll = F.cross_entropy(torch.softmax(lm_ilm_sum,dim=2).view(-1, y.shape[-1]), t.view(-1), reduction="none")
 
                 # nll: (BxL,) -> (BxL,)
                 if max_length is None:

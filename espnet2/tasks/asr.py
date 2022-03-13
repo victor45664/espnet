@@ -915,6 +915,17 @@ class ASRTask_ilme_unadl(ASRTask):
             def parameters(self):
                 return self.para
 
+        cls.trainer.no_adl_param = []
+        if "no_adl_param" in args.ilme_conf: #设置需要
+            for t in args.ilme_conf["no_adl_param"]:
+                for k, p in model.decoder.named_parameters():
+                    if k.startswith(t + ".") or k == t:
+                        logging.info(f"Unadl loss won't affect {k}")
+                        cls.trainer.no_adl_param.append(p)
+
+
+
+
         if "freeze_dropout" not in args.ilme_conf or args.ilme_conf["freeze_dropout"]==False: #默认不关闭dropout
             cls.trainer.freeze_dropout=False
         else:

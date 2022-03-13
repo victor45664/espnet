@@ -117,9 +117,9 @@ class LabelSmoothingLoss_unadl(nn.Module):
                 target = target.masked_fill(ignore, 0)  # avoid -1 index
                 true_dist.fill_(self.smoothing / (self.size - 1))
                 true_dist.scatter_(1, target.unsqueeze(1), self.confidence)
-
-            kl = self.criterion(torch.log_softmax(x, dim=1), true_dist)
-            un_adl_loss=self.criterion(torch.log_softmax(x, dim=1), self.un_dist.expand([batch_size*T,self.size]))
+            log_softmax_x=torch.log_softmax(x, dim=1)
+            kl = self.criterion(log_softmax_x, true_dist)
+            un_adl_loss=self.criterion(log_softmax_x, self.un_dist.expand([batch_size*T,self.size]))
             denom = total if self.normalize_length else batch_size
             return kl.masked_fill(ignore.unsqueeze(1), 0).sum() / denom,un_adl_loss.masked_fill(ignore.unsqueeze(1), 0).sum() / denom
         else:
