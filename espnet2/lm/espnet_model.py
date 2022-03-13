@@ -177,6 +177,29 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
             t[i, l] = self.sos
         x_lengths = text_lengths + 1
 
+
+
+        if doing_kd:
+            # 3. Forward internal Language model
+            # x: (Batch, Length) -> y: (Batch, Length, NVocab)
+
+            with torch.no_grad():
+                fake_encoder_out = x.new_zeros(batch_size, 1, self.encoder_output_size)
+                self.decoder.eval()
+                ilm_output, _ = self.decoder.forward_ilm(
+                    fake_encoder_out, -1, x, x_lengths
+                )
+                ilm_output = torch.log_softmax(ilm_output, dim=2).detach()
+                #vdebug torch.sum(torch.exp(ilm_output),dim=2)==1
+
+                y_lm_kd, _ = self.lm_kd(x, None)
+                y_lm_kd=torch.log_softmax(y_lm_kd, dim=2)
+                teacher_label =torch.softmax( y_lm_kd - self.kd_factor * ilm_output,dim=2)  # log相加后概率不是归一化的
+
+
+
+
+
         # 2. Forward Language model
         # x: (Batch, Length) -> y: (Batch, Length, NVocab)
         y, _ = self.lm(x, None)
@@ -205,19 +228,6 @@ class ESPnetLanguageModel_kd(ESPnetLanguageModel):
         if doing_kd:
             # 3. Forward internal Language model
             # x: (Batch, Length) -> y: (Batch, Length, NVocab)
-
-            with torch.no_grad():
-                fake_encoder_out = x.new_zeros(batch_size, 1, self.encoder_output_size)
-                self.decoder.eval()
-                ilm_output, _ = self.decoder.forward_ilm(
-                    fake_encoder_out, -1, x, x_lengths
-                )
-                ilm_output = torch.log_softmax(ilm_output, dim=2).detach()
-                #vdebug torch.sum(torch.exp(ilm_output),dim=2)==1
-
-                y_lm_kd, _ = self.lm_kd(x, None)
-                y_lm_kd=torch.log_softmax(y_lm_kd, dim=2)
-                teacher_label =torch.softmax( y_lm_kd - self.kd_factor * ilm_output,dim=2)  # log相加后概率不是归一化的
 
             lm_log_softmax=torch.log_softmax(y, dim=2)
             kd_loss = self.kl_loss(lm_log_softmax.view(-1, self.vocab_size), teacher_label.view(-1, self.vocab_size))
