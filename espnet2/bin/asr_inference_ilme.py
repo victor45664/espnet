@@ -3,12 +3,13 @@ import argparse
 import logging
 from pathlib import Path
 import sys
+import time
 from typing import Any
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
 from typing import Union
-
+import humanfriendly
 import numpy as np
 import torch
 from typeguard import check_argument_types
@@ -126,7 +127,7 @@ class Speech2Text:
             asr_train_config, asr_model_file, device
         )
         asr_model.to(dtype=getattr(torch, dtype)).eval()
-
+        self.fs=humanfriendly.parse_size(asr_train_args.frontend_conf["fs"])
         decoder = asr_model.decoder
         ctc = CTCPrefixScorer(ctc=asr_model.ctc, eos=asr_model.eos)
         token_list = asr_model.token_list
@@ -446,7 +447,8 @@ def inference(
         allow_variable_data_keys=allow_variable_data_keys,
         inference=True,
     )
-
+    total_decode_time=0
+    total_speech_length=0
     # 7 .Start for-loop
     # FIXME(kamo): The output format should be discussed about
     with DatadirWriter(output_dir) as writer:
@@ -458,8 +460,11 @@ def inference(
             batch = {k: v[0] for k, v in batch.items() if not k.endswith("_lengths")}
 
             # N-best list of (text, token, token_int, hyp_object)
+            total_speech_length+=batch["speech"].size(0)/speech2text.fs
             try:
+                t0=time.time()
                 gridesearchresults = speech2text(**batch)
+                total_decode_time+=time.time()-t0
             except TooShortUttError as e:
                 logging.warning(f"Utterance {keys} {e}")
                 hyp = Hypothesis(score=0.0, scores={}, states={}, yseq=[])
@@ -483,7 +488,8 @@ def inference(
                     if text is not None:
                         ibest_writer["text"][key] = text
                 torch.cuda.empty_cache()
-
+        writer["decode_stat"]["total_speech_length"]=str(total_speech_length)
+        writer["decode_stat"]["total_decode_time"]=str(total_decode_time)
 def get_parser():
     parser = config_argparse.ArgumentParser(
         description="ASR Decoding",
