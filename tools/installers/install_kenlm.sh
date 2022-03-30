@@ -6,8 +6,8 @@ if [ $# != 0 ]; then
     exit 1;
 fi
 
-rm -rf kenlm
-git clone https://github.com/kpu/kenlm.git
+#rm -rf kenlm
+#git clone https://github.com/kpu/kenlm.git
 (
     set -euo pipefail
     cd kenlm

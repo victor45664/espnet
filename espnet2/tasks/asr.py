@@ -11,7 +11,6 @@ import numpy as np
 import torch
 from typeguard import check_argument_types
 from typeguard import check_return_type
-
 from espnet2.asr.ctc import CTC
 from espnet2.asr.decoder.abs_decoder import AbsDecoder
 from espnet2.asr.decoder.rnn_decoder import RNNDecoder
@@ -477,6 +476,8 @@ class ASRTask(AbsTask):
 
         assert check_return_type(model)
         return model
+
+
 
 class ASRTask_kd(ASRTask):
     trainer = Trainer_kd
