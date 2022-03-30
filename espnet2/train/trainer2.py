@@ -853,6 +853,8 @@ class Trainer_ilmt(Trainer):
                 log_interval = 100
 
         model.train()
+        if cls.freeze_encoder:
+            freeze_encoder(model)
         all_steps_are_invalid = True
         # [For distributed] Because iteration counts are not always equals between
         # processes, send stop-flag to the other processes if iterator is finished

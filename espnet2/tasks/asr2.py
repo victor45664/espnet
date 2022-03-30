@@ -592,3 +592,34 @@ class ASRTask_ilmt(ASRTask):
             train=train,
         )
 
+    @classmethod
+    def build_optimizers(
+        cls,
+        args: argparse.Namespace,
+        model: torch.nn.Module,
+    ) -> List[torch.optim.Optimizer]:
+        class fakemodel(object):
+            #假模型，用于替换parameters
+            def __init__(self,para):
+                self.para=para
+            def parameters(self):
+                return self.para
+
+
+
+
+
+
+        if "freeze_encoder" not in args.ilme_conf or args.ilme_conf["freeze_encoder"]==True: #默认冻结encoder参数
+            mymodel = fakemodel(list(model.decoder.parameters())) #一个只含有decoder参数的假model，用于指定更新哪些参数，自然包括ilme的参数
+            for para in model.encoder.parameters():
+                para.requires_grad = False
+            cls.trainer.freeze_encoder=True
+        else:
+            cls.trainer.freeze_encoder = False
+            mymodel=model  #需要更新encoder参数，等效于整个模型的参数都需要更新
+
+
+        optimizers = super().build_optimizers(args,mymodel)
+
+        return optimizers
