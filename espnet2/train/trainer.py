@@ -59,7 +59,7 @@ except ImportError:
     fairscale = None
 
 def freeze_encoder(model):
-    if isinstance(model, torch.nn.DataParallel):
+    if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
         encoder=model.module.encoder
     else:
         encoder=model.encoder
@@ -850,7 +850,7 @@ class Trainer_kd(Trainer):
 
         model.train()
         if cls.freeze_encoder:
-            if isinstance(model, torch.nn.DataParallel):
+            if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
                 model.module.encoder.eval()
             else:
                 model.encoder.eval()
@@ -1351,12 +1351,11 @@ class Trainer_ilme_adl(Trainer):
         #ilm related
         ilm_loss_accum=0
         ilm_loss_accum_count=0
-        if isinstance(model, torch.nn.DataParallel):
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
             model_adl_begin_loss=model.module.adl_begin_loss
             model_decoder_parameter=model.module.decoder.decoder_parameter
             model_ctc_weight=model.module.ctc_weight
             model_adl_factor=model.module.adl_factor
-
         else:
             model_adl_begin_loss = model.adl_begin_loss
             model_decoder_parameter = model.decoder.decoder_parameter
@@ -1703,7 +1702,7 @@ class Trainer_ilme_unadl(Trainer):
         #ilm related
         ilm_loss_accum=0
         ilm_loss_accum_count=0
-        if isinstance(model, torch.nn.DataParallel):
+        if isinstance(model, torch.nn.DataParallel) or isinstance(model, torch.nn.parallel.DistributedDataParallel):
             model_adl_begin_loss=model.module.adl_begin_loss
             model_decoder_parameter=model.module.decoder.decoder_parameter
             model_ilme_parameter=model.module.decoder.ilme_parameter
