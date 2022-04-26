@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 #victor 2022.4.12
 
@@ -46,6 +46,10 @@ ifresume_training=false
 
 
 
+# echo qsub_mutation=$mutation,qsub_ifresume_training=$ifresume_training
+# echo $modelname
+# exit 0;
+
 mkdir -p log/$modelname
 
 
@@ -55,22 +59,22 @@ then
 
 
 
-qsub -P 12001458 -j oe -q dgx -l select=1:ncpus=10:ngpus=$num_of_gpu -N $jobname \
+qsub  -P 12001458 -j oe -q dgx -l select=1:ncpus=1:ngpus=$num_of_gpu -N $jobname \
 	-l walltime=24:00:00 -o log/$modelname/$jobname.log \
 	-v qsub_mutation=$mutation,qsub_ifresume_training=$ifresume_training \
-	./unadl_exp/decode.sh
+	/$modelname/train.sh
 
 
 echo "begin to run "$modelname "mutation:"$mutation with $num_of_gpu GPU
 
 
 
-else 
+else
 
 
 #$modeldir"train.sh" $mutation $ifresume_training
 
-$modeldir"train.sh" $mutation $ifresume_training 2>&1 | tee log/$modelname/$jobname.log
+export qsub_mutation=$mutation;export qsub_ifresume_training=$ifresume_training;$modeldir"train.sh" 2>&1 | tee log/$modelname/$jobname.log
 
 fi
 
