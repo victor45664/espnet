@@ -1,10 +1,9 @@
 #!/bin/bash
 #victor 2020.9.12
-cd /home/projects/12001458/yufei/espnet/egs2/voice_conversion/vc1
-. ./path.sh
 
-mutation=$qsub_mutation
-ifresume_training=$qsub_ifresume_training
+
+mutation=$1
+ifresume_training=$2
 
 if [ $ifresume_training == false ]
 then
