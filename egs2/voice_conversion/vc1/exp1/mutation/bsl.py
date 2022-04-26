@@ -8,8 +8,11 @@ from espnet2.VC_SRC.Model_component.default_hparams import  create_hparams
 from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 
 #
-datadir='$root_path/tf_project/a2m_VC/models/multi_spk_deploy/data_24K'
+source_scp='/home/victor/espnet/egs2/voice_conversion/vc1/data/source.scp'
+target_scp='/home/victor/espnet/egs2/voice_conversion/vc1/data/target.scp'
 
+source_scp_test='/home/victor/espnet/egs2/voice_conversion/vc1/data/source.scp'
+target_scp_test='/home/victor/espnet/egs2/voice_conversion/vc1/data/target.scp'
 optimizer=torch.optim.Adam
 def getlr(step, lr0=0.001,warmup_steps = 4000.0):
     lr=lr0 * warmup_steps**0.5 * min(step * warmup_steps**-1.5, step**-0.5)
@@ -17,6 +20,8 @@ def getlr(step, lr0=0.001,warmup_steps = 4000.0):
 
 
 hparams=create_hparams()
+hparams.batchsize=2
+
 
 #hparam override
 #hparams.attention_location_n_filters=4
@@ -478,8 +483,13 @@ class VC_model(nn.Module):
         mask = ~get_mask_from_lengths(target_utts_lengths)
         gate_target.data.masked_fill_(mask, 1.0)
         gate_loss=self.gate_loss(gate_outputs,gate_target)
+        state={}
+        state["mel_loss"]=mel_loss
+        state["mel_loss_final"]=mel_loss_final
+        state["gate_loss"]=gate_loss
         loss=mel_loss+ mel_loss_final+gate_loss
-        return loss,mel_outputs_postnet
+
+        return loss,mel_outputs_postnet,state
 
 
     def inference(self, inputs):

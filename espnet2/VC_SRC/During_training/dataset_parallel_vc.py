@@ -1,15 +1,13 @@
 # -*- coding: utf-8 -*-
 import sys
 sys.path.append('')
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset,DataLoader
 import time
 import pandas as pd
-import os
+
 import threading
 import numpy as np
-import random
-import kaldi_io
-import math
+
 
 def change_length(input_feat,disired_length):
     current_length=input_feat.shape[0]
@@ -67,10 +65,12 @@ class RA_parallel_Reader_General(object):
         return self.num_of_valid_sample
 
     def index2sample(self,index):
-        source_utt=self.total_valid_sample['source_utt'][index]
-        target_utt=self.total_valid_sample['target_utt'][index]
-        source_utt_feat=kaldi_io.read_mat(source_utt)
-        target_utt_feat=kaldi_io.read_mat(target_utt)
+        source_utt_path=self.total_valid_sample['source_utt'][index]
+        target_utt_path=self.total_valid_sample['target_utt'][index]
+        # source_utt_feat=kaldi_io.read_mat(source_utt)
+        # target_utt_feat=kaldi_io.read_mat(target_utt)
+        source_utt_feat=np.load(source_utt_path)
+        target_utt_feat=np.load(target_utt_path)
         return source_utt_feat,target_utt_feat
 
 
@@ -135,24 +135,118 @@ class parallel_dataset_Genrnal(Dataset):
         return source_utt_batch,source_utt_length_batch,target_utt_batch,target_utt_length_batch
 
 
+def group_length_sorting_collate_fn(batch_list):
+    batch_list.sort(key=lambda x: x[0].shape[0])  # 第一个数据的1维度就是长度，按照长度排序
+    return batch_list
+
+
+class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
+                                                        #长度以dataset返回的第一个.shape[0]为准，参考group_length_sorting_collate_fn函数
+    def __init__(self, dataset, batchsize, log_string=None, num_workers=4, batch_per_group=32,max_batchsize_mul_max_length=32*400,min_batch_size=16):
+                                                            # max_batchsize_mul_max_length是指batchsize*max_length的最大值，如果超过会自动减小batchsize，这是为了防止现存爆炸,这个不能太小，否则会出错
+        self.log_string = log_string                        #min_batch_size是最小允许的batchsize，防止seq_length太长导致batchsize太小
+        self.dataset = dataset
+        self.batch_per_group = batch_per_group
+        self.batchsize = batchsize
+        self.max_batchsize_mul_max_length=max_batchsize_mul_max_length
+        self.min_batch_size=min(min_batch_size,batchsize-1)
+        self.group_dataloader = DataLoader(dataset=self.dataset,
+                                              batch_size=self.batch_per_group*self.batchsize,
+                                              shuffle=True,
+                                              num_workers=num_workers,
+                                              drop_last=False,
+                                              collate_fn=group_length_sorting_collate_fn)
+
+        self.single_sample_dataloader_iter=iter(self.group_dataloader)
+        self.epoch = 0
+        self.loading_group=0
+        self.residual_sample=[] #过长的序列，可能会被抛弃，因此攒起来
+        self.next_group()
+        self._next_batch_thread = threading.Thread(target=self._next_batch)
+        self._next_batch_thread.start()
+
+
+
+    def next_group(self):
+        self.current_group = self.single_sample_dataloader_iter.next()
+        self.loading_sample = 0
+
+        self.loading_group += 1
+
+        if self.loading_group >= len(self.group_dataloader):
+            self.single_sample_dataloader_iter = iter(self.group_dataloader)
+            self.epoch = self.epoch + 1
+            self.loading_group = 0
+            if self.log_string!=None:
+                print(
+                    "{},{} epoch{}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), self.log_string,
+                                           self.epoch))  # 一个epoch了
+
+    def next_batch(self):
+        self._next_batch_thread.join()
+        cb = self.current_batch
+        self._next_batch_thread = threading.Thread(target=self._next_batch)
+        self._next_batch_thread.start()
+        return cb
+
+    def _next_batch(self):
+
+        if len(self.residual_sample)>self.min_batch_size:
+            self.current_batch= self.dataset.collect_fn(self.residual_sample)
+            self.residual_sample=[]
+            return self.current_batch    #如果收集到了足够的residual sample就使用这些，否则正常next batch
+
+
+
+
+        if self.loading_sample+self.min_batch_size > len(self.current_group):
+            self.residual_sample.extend(self.current_group[self.loading_sample:])
+            self.next_group()
+
+
+
+        sp=self.loading_sample  #起始样品指针
+        ep=min(self.loading_sample+self.batchsize,len(self.current_group)-1)  #终止样品指针
+
+        while 1:
+            cb=self.current_group[ep]
+            if cb[0].shape[0]*(ep-sp)>self.max_batchsize_mul_max_length:
+                ep-=1
+            else:
+                break    #这里长度以第一个的.shape[0] 为准
+
+
+        current_batch = self.current_group[sp:ep]
+        self.loading_sample =ep
+
+        if len(current_batch)<self.min_batch_size:
+            self.residual_sample.extend(current_batch)
+            self.next_group()
+            return self.current_batch  #样本太少了，直接返回上一个batch，导致这个情况有可能是group中剩余样本太少，或者之后的序列都太长，either way we should get next group
+        else:
+            self.current_batch=self.dataset.collect_fn(current_batch)   #这里是给下一个batch预备的，如果下一个batch数据不足，就直接返回这个
+            return self.current_batch
+
 
 
 
 if __name__=='__main__':
-    from espnet2.VC_SRC.During_training.dataset import infinite_seqlength_optmized_dataloader
+
     train_dataset = parallel_dataset_Genrnal(
-        'path',"",
-        output_per_step=2)
-    loader=infinite_seqlength_optmized_dataloader(train_dataset,32,num_workers=2,batch_per_group=8)
+        '/home/victor/espnet/egs2/voice_conversion/vc1/data/source.scp','/home/victor/espnet/egs2/voice_conversion/vc1/data/target.scp',
+        output_per_step=1)
+
+    loader=infinite_seqlength_optmized_dataloader(train_dataset,2,num_workers=2,batch_per_group=8)
 
     t0=time.time()
     for i in range(100):
-        BN_feat_batch,mel_target_batch,spk_batch,seq_length_batch=loader.next_batch()
+        source_utt,source_utt_length,target_utt,target_utt_length=loader.next_batch()
         #time.sleep(2)
-        print(BN_feat_batch.shape)
-        print(mel_target_batch.shape)
-        print(spk_batch)
-        print(seq_length_batch)
+        print(source_utt.shape)
+        print(source_utt.mean())
+        print(source_utt_length)
+        print(target_utt.shape)
+        print(target_utt_length)
         print('================')
 
     print("total time:",time.time()-t0)
