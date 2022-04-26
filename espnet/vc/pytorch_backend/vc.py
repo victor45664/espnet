@@ -268,7 +268,7 @@ def train(args):
         valid_json = json.load(f)["utts"]
     utts = list(valid_json.keys())
 
-    # In TTS, this is reversed, but not in VC. See `espnet.utils.training.batchfy`
+    # In TTS, this is reversed, but not in VC. See `espnet.VC_utils.training.batchfy`
     idim = int(valid_json[utts[0]]["input"][0]["shape"][1])
     odim = int(valid_json[utts[0]]["output"][0]["shape"][1])
     logging.info("#input dims : " + str(idim))

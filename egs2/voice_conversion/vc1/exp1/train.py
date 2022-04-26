@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import sys
 sys.path.append('')
-from espnet2.VC_SRC.During_training import BNfeats_meltarget_spk_dataset,infinite_seqlength_optmized_dataloader
-
-from espnet2.VC_SRC.utils import get_gpu
+from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal
+from espnet2.VC_SRC.During_training.dataset import infinite_seqlength_optmized_dataloader
+from espnet2.VC_SRC.VC_utils.gpu_util import get_gpu
 import time
 import os
-from espnet2.VC_SRC.Model_component import change_lr
+from espnet2.VC_SRC.Model_component.VC_utils import change_lr
 mutationname=sys.argv[1]
 from tensorboardX import SummaryWriter
 import torch
@@ -33,10 +33,10 @@ class loss_logger(object):
 logger=loss_logger(loggerdir)
 
 
-train_dataset=BNfeats_meltarget_spk_dataset(os.path.join(mynn.datadir,'train'), output_per_step=mynn.hparams.n_frames_per_step,max_length_allowed=4000)
+train_dataset=parallel_dataset_Genrnal(os.path.join(mynn.datadir,'train'), output_per_step=mynn.hparams.n_frames_per_step)
 train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4,batch_per_group=8)
 
-test_dataset=BNfeats_meltarget_spk_dataset(os.path.join(mynn.datadir,'dev'), output_per_step=mynn.hparams.n_frames_per_step,max_length_allowed=4000)
+test_dataset=parallel_dataset_Genrnal(os.path.join(mynn.datadir,'dev'), output_per_step=mynn.hparams.n_frames_per_step)
 test_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2,batch_per_group=4)
 
 

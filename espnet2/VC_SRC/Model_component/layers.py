@@ -1,6 +1,6 @@
 import torch
 
-from espnet2.VC_SRC.Model_component import get_mask_from_lengths
+from espnet2.VC_SRC.Model_component.VC_utils import get_mask_from_lengths
 
 
 

@@ -3,7 +3,7 @@ import sys
 sys.path.append('')
 from espnet2.VC_SRC.During_training import BNfeats_meltarget_spk_dataset
 from torch.utils.data import DataLoader
-from espnet2.VC_SRC.utils import get_gpu
+from espnet2.VC_SRC.VC_utils import get_gpu
 from espnet2.VC_SRC import result_to_dir
 from espnet2.VC_SRC.evaluation.eval_dataset import eval_dataset
 import os

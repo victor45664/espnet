@@ -37,7 +37,7 @@ class ChainerDataLoader(object):
     """Pytorch dataloader in chainer style.
 
     Args:
-        all args for torch.utils.data.dataloader.Dataloader
+        all args for torch.VC_utils.data.dataloader.Dataloader
 
     """
 

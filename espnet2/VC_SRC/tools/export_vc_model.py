@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys
 sys.path.append('')
-from espnet2.VC_SRC.utils import dynamic_import_from_abs_path,path_to_model_save_path
+from espnet2.VC_SRC.VC_utils import dynamic_import_from_abs_path,path_to_model_save_path
 import tensorflow as tf
 import os
 

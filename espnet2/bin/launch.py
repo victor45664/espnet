@@ -22,7 +22,7 @@ def get_parser():
     parser.add_argument(
         "--cmd",
         help="The path of cmd script of Kaldi: run.pl. queue.pl, or slurm.pl",
-        default="utils/run.pl",
+        default="VC_utils/run.pl",
     )
     parser.add_argument(
         "--log",
@@ -100,7 +100,7 @@ def main(cmd=None):
 
     if args.host is None and shutil.which(args.cmd[0]) is None:
         raise RuntimeError(
-            f"The first args of --cmd should be a script path. e.g. utils/run.pl: "
+            f"The first args of --cmd should be a script path. e.g. VC_utils/run.pl: "
             f"{args.cmd[0]}"
         )
 

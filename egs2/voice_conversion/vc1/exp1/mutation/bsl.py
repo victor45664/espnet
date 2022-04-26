@@ -2,10 +2,10 @@ import torch
 from torch.autograd import Variable
 from torch import nn
 from torch.nn import functional as F
-from espnet2.VC_SRC.Model_component import ConvNorm, LinearNorm
-from espnet2.VC_SRC.Model_component import  get_mask_from_lengths
+from espnet2.VC_SRC.Model_component.layers import ConvNorm, LinearNorm
+from espnet2.VC_SRC.Model_component.VC_utils import  get_mask_from_lengths
 from espnet2.VC_SRC.Model_component.default_hparams import  create_hparams
-
+from espnet2.asr.encoder.conformer_encoder import ConformerEncoder
 
 #
 datadir='$root_path/tf_project/a2m_VC/models/multi_spk_deploy/data_24K'
@@ -20,6 +20,10 @@ hparams=create_hparams()
 
 #hparam override
 #hparams.attention_location_n_filters=4
+
+
+
+
 
 
 
@@ -263,8 +267,7 @@ class Decoder(nn.Module):
         inputs: processed decoder inputs
 
         """
-        # (B, n_mel_channels, T_out) -> (B, T_out, n_mel_channels)
-        decoder_inputs = decoder_inputs.transpose(1, 2)
+
         decoder_inputs = decoder_inputs.view(
             decoder_inputs.size(0),
             int(decoder_inputs.size(1)/self.n_frames_per_step), -1)
@@ -418,33 +421,26 @@ class Decoder(nn.Module):
         return mel_outputs, gate_outputs, alignments
 
 
-class Tacotron2(nn.Module):
+class VC_model(nn.Module):
     def __init__(self, hparams):
-        super(Tacotron2, self).__init__()
+        super(VC_model, self).__init__()
         self.mask_padding = hparams.mask_padding
-        self.fp16_run = hparams.fp16_run
+
         self.n_mel_channels = hparams.n_mel_channels
         self.n_frames_per_step = hparams.n_frames_per_step
 
 
-        self.encoder = Encoder(hparams)
+        self.encoder = ConformerEncoder(
+            input_size=hparams.source_feat_dim,
+                        **hparams.encoder_conf
+                            )
+
         self.decoder = Decoder(hparams)
         self.postnet = Postnet(hparams)
 
-    def parse_batch(self, batch):
-        text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths = batch
-        text_padded = to_gpu(text_padded).long()
-        input_lengths = to_gpu(input_lengths).long()
-        max_len = torch.max(input_lengths.data).item()
-        mel_padded = to_gpu(mel_padded).float()
-        gate_padded = to_gpu(gate_padded).float()
-        output_lengths = to_gpu(output_lengths).long()
+        self.l1loss=nn.L1Loss(reduction="mean")
 
-        return (
-            (text_padded, input_lengths, mel_padded, max_len, output_lengths),
-            (mel_padded, gate_padded))
-
+        self.gate_loss = nn.BCEWithLogitsLoss()
     def parse_output(self, outputs, output_lengths=None):
         if self.mask_padding and output_lengths is not None:
             mask = ~get_mask_from_lengths(output_lengths)
@@ -457,23 +453,34 @@ class Tacotron2(nn.Module):
 
         return outputs
 
-    def forward(self, inputs):
-        text_inputs, text_lengths, mels, max_len, output_lengths = inputs
-        text_lengths, output_lengths = text_lengths.data, output_lengths.data
+    def forward(self, source_utts, source_utts_lengths, target_utts, target_utts_lengths):
 
-        embedded_inputs = self.embedding(text_inputs).transpose(1, 2)
+        source_utts_lengths, target_utts_lengths = source_utts_lengths.data, target_utts_lengths.data
 
-        encoder_outputs = self.encoder(embedded_inputs, text_lengths)
+
+        encoder_outputs,encoder_outputs_length,_ = self.encoder(source_utts, source_utts_lengths)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
-            encoder_outputs, mels, memory_lengths=text_lengths)
+            encoder_outputs, target_utts, memory_lengths=encoder_outputs_length)
 
         mel_outputs_postnet = self.postnet(mel_outputs)
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
 
-        return self.parse_output(
+        mel_outputs,mel_outputs_postnet,gate_outputs,alignments=self.parse_output(
             [mel_outputs, mel_outputs_postnet, gate_outputs, alignments],
-            output_lengths)
+            target_utts_lengths)
+
+        target_utts_for_loss=target_utts.permute(0, 2, 1)
+        mel_loss = self.l1loss(mel_outputs, target_utts_for_loss)
+        mel_loss_final=self.l1loss(mel_outputs_postnet, target_utts_for_loss)
+
+        gate_target = gate_outputs.new_zeros(gate_outputs.size())
+        mask = ~get_mask_from_lengths(target_utts_lengths)
+        gate_target.data.masked_fill_(mask, 1.0)
+        gate_loss=self.gate_loss(gate_outputs,gate_target)
+        loss=mel_loss+ mel_loss_final+gate_loss
+        return loss,mel_outputs_postnet
+
 
     def inference(self, inputs):
         embedded_inputs = self.embedding(inputs).transpose(1, 2)
@@ -486,19 +493,23 @@ class Tacotron2(nn.Module):
 
         outputs = self.parse_output(
             [mel_outputs, mel_outputs_postnet, gate_outputs, alignments])
-
+        return outputs
 
 if __name__ == '__main__':
     m = VC_model(hparams)
 
-    B=1
-    max_length=84
-    bn_feat=torch.rand((B,max_length,512))
-    target_mel=torch.zeros((B,max_length,80))
-    seq_length=torch.randint(0,max_length,(B,))
-    spk_id=torch.randint(0,22,(B,))
+    B=3
 
-    seq_length[0]=max_length
+    max_source_length=97
+    source_utt_feat=torch.rand((B, max_source_length, hparams.source_feat_dim))
+    source_utt_feat_length = torch.randint(0, max_source_length, (B,))
 
-    loss = m(bn_feat, seq_length,spk_id, target_mel)
+    max_target_length=111
+    target_utt_feat=torch.zeros((B, max_target_length, 80))
+    target_utt_feat_length = torch.randint(0, max_target_length, (B,))
+
+    source_utt_feat_length[0]=max_source_length
+    target_utt_feat_length[0]=max_target_length
+
+    loss,mel = m(source_utt_feat, source_utt_feat_length,target_utt_feat, target_utt_feat_length)
     bb = 1

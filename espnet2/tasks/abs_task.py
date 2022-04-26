@@ -201,7 +201,7 @@ class AbsTask(ABC):
     ) -> Callable[[Sequence[Dict[str, np.ndarray]]], Dict[str, torch.Tensor]]:
         """Return "collate_fn", which is a callable object and given to DataLoader.
 
-        >>> from torch.utils.data import DataLoader
+        >>> from torch.VC_utils.data import DataLoader
         >>> loader = DataLoader(collate_fn=cls.build_collate_fn(args, train=True), ...)
 
         In many cases, you can use our common collate_fn.

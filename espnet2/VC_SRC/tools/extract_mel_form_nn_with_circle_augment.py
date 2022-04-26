@@ -3,14 +3,14 @@ import sys
 sys.path.append('')
 from espnet2.VC_SRC.During_training import BNfeats_meltarget_spk_dataset
 from torch.utils.data import DataLoader
-from espnet2.VC_SRC.utils import get_gpu
+from espnet2.VC_SRC.VC_utils import get_gpu
 import kaldi_io
 import tensorflow as tf
 from espnet2.VC_SRC.evaluation.eval_dataset import eval_dataset
 import os
 import numpy as np
 from espnet2.VC_SRC.Model_component import l2loss,l1_mel_loss
-from espnet2.VC_SRC.utils import path_to_module,path_to_model_save_path
+from espnet2.VC_SRC.VC_utils import path_to_module,path_to_model_save_path
 
 mutation_path = './models/multi_spk_deploy_mel80/mutation/baseline_mvemb_larger_larger_finetune.py'
 output_dir='./exp/extraction/multi_spk_deploy_mel80_baseline_mvemb_larger_larger_finetune'

@@ -1,4 +1,4 @@
-from espnet2.VC_SRC.utils import HParams
+from espnet2.VC_SRC.VC_utils import HParams
 
 
 # Default hyperparameters:

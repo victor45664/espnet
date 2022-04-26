@@ -247,7 +247,7 @@ EOF
 )
 
 log "$0 $*"
-# Save command line args for logging (they will be lost after utils/parse_options.sh)
+# Save command line args for logging (they will be lost after VC_utils/parse_options.sh)
 run_args=$(pyscripts/utils/print_args.py $0 "$@")
 . utils/parse_options.sh
 
