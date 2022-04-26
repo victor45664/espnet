@@ -85,10 +85,10 @@ for step in range(1,mynn.hparams.total_iteration+1):
             model.train()
         logger.add_log(step,total_loss.item(),state,lr)
     else:
-        source_utt=torch.from_numpy(source_utt).float()
-        target_utt=torch.from_numpy(target_utt).float()
-        target_utt_length=torch.from_numpy(target_utt_length)
-        source_utt_length=torch.from_numpy(source_utt_length)
+        source_utt=torch.from_numpy(source_utt).float().cuda()
+        target_utt=torch.from_numpy(target_utt).float().cuda()
+        target_utt_length=torch.from_numpy(target_utt_length).cuda()
+        source_utt_length=torch.from_numpy(source_utt_length).cuda()
 
         loss,_,_ = model(source_utt,source_utt_length,target_utt,target_utt_length)
         loss.backward()
