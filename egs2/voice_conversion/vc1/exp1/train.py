@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import sys
 sys.path.append('')
-from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal,infinite_seqlength_optmized_dataloader
+from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal,infinite_dataloader
 
 import time
 import os
@@ -34,19 +34,19 @@ class loss_logger(object):
 logger=loss_logger(loggerdir)
 
 
-train_dataset=parallel_dataset_Genrnal(mynn.source_scp,mynn.target_scp, output_per_step=mynn.hparams.n_frames_per_step)
-train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4,batch_per_group=8)
+train_dataset=parallel_dataset_Genrnal(mynn.source_scp,mynn.target_scp, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
+train_loader=infinite_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4)
 
-test_dataset=parallel_dataset_Genrnal(mynn.source_scp_test,mynn.target_scp_test, output_per_step=mynn.hparams.n_frames_per_step)
-test_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2,batch_per_group=4)
+test_dataset=parallel_dataset_Genrnal(mynn.source_scp_test,mynn.target_scp_test, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
+test_loader=infinite_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2)
 
 
 model=mynn.VC_model(mynn.hparams)
 
+device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-
-model=model.cuda() #vdebug
+model=model.to(device) #vdebug
 #model=model #vdebug
 
 optimizer=mynn.optimizer(model.parameters(), lr=mynn.hparams.learning_rate,
@@ -69,15 +69,12 @@ for step in range(1,mynn.hparams.total_iteration+1):
         source_utt_test,source_utt_length_test,target_utt_test,target_utt_length_test=test_loader.next_batch()
         torch.save(model.state_dict(), model_save_path)
 
-        source_utt_test=torch.from_numpy(source_utt_test).float().cuda()
-        target_utt_test=torch.from_numpy(target_utt_test).float().cuda()
-        target_utt_length_test=torch.from_numpy(target_utt_length_test).cuda()
-        source_utt_length_test=torch.from_numpy(source_utt_length_test).cuda()
+        source_utt_test=torch.from_numpy(source_utt_test).float().to(device) #vdebug
+        target_utt_test=torch.from_numpy(target_utt_test).float().to(device) #vdebug
+        target_utt_length_test=torch.from_numpy(target_utt_length_test).to(device) #vdebug
+        source_utt_length_test=torch.from_numpy(source_utt_length_test).to(device) #vdebug
 
-        # source_utt_test=torch.from_numpy(source_utt_test).float()
-        # target_utt_test=torch.from_numpy(target_utt_test).float()
-        # target_utt_length_test=torch.from_numpy(target_utt_length_test)
-        # source_utt_length_test=torch.from_numpy(source_utt_length_test)
+
 
         with torch.no_grad():
             model.eval()
@@ -85,10 +82,10 @@ for step in range(1,mynn.hparams.total_iteration+1):
             model.train()
         logger.add_log(step,total_loss.item(),state,lr)
     else:
-        source_utt=torch.from_numpy(source_utt).float().cuda()
-        target_utt=torch.from_numpy(target_utt).float().cuda()
-        target_utt_length=torch.from_numpy(target_utt_length).cuda()
-        source_utt_length=torch.from_numpy(source_utt_length).cuda()
+        source_utt=torch.from_numpy(source_utt).float().to(device) #vdebug
+        target_utt=torch.from_numpy(target_utt).float().to(device) #vdebug
+        target_utt_length=torch.from_numpy(target_utt_length).to(device) #vdebug
+        source_utt_length=torch.from_numpy(source_utt_length).to(device) #vdebug
 
         loss,_,_ = model(source_utt,source_utt_length,target_utt,target_utt_length)
         loss.backward()

@@ -2,12 +2,12 @@
 
 import os
 import numpy as np
-from espnet2.VC_SRC import gen
+from espnet2.VC_SRC.evaluation.vocoder import None_gen
 
 
 
 
-def result_to_dir(keys,mels,mels_length,dir,vocoder=gen):
+def result_to_dir(keys,mels,mels_length,dir,vocoder=None_gen):
     assert len(keys)==mels.shape[0]
 
     if not os.path.exists(dir):

@@ -3,6 +3,4 @@
 
 mutation=$1
 
-$root_path/anaconda3/envs/pytorch/bin/python -u $(dirname $0)/eval.py $mutation 0 || exit 1;
-
-
+python -u $(dirname $0)/eval.py $mutation 0 || exit 1;

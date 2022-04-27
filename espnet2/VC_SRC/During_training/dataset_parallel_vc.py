@@ -49,7 +49,7 @@ def _round_up(length, multiple):
 
 
 class RA_parallel_Reader_General(object):
-    def __init__(self, source_utt_scp_file_path, target_utt_scp_file_path):
+    def __init__(self, source_utt_scp_file_path, target_utt_scp_file_path,cache_data=False):
         source_utt_scp=pd.read_csv(target_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'source_utt'])
         target_utt_scp=pd.read_csv(source_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'target_utt'])
         print("find {} source_utt".format(len(source_utt_scp)))
@@ -59,18 +59,28 @@ class RA_parallel_Reader_General(object):
         self.total_valid_sample=self.total_valid_sample.reset_index(drop=True)
         self.num_of_valid_sample=len(self.total_valid_sample)
         print("{} valid sample".format(self.num_of_valid_sample))
-
+        self.cache_data=False
+        if cache_data:
+            self.cache=[]
+            for i in range(self.num_of_valid_sample):
+                self.cache.append(self.index2sample(i))
+            self.cache_data = True
 
     def __len__(self):
         return self.num_of_valid_sample
 
     def index2sample(self,index):
-        source_utt_path=self.total_valid_sample['source_utt'][index]
-        target_utt_path=self.total_valid_sample['target_utt'][index]
-        # source_utt_feat=kaldi_io.read_mat(source_utt)
-        # target_utt_feat=kaldi_io.read_mat(target_utt)
-        source_utt_feat=np.load(source_utt_path)
-        target_utt_feat=np.load(target_utt_path)
+
+        if self.cache_data:
+            source_utt_feat,target_utt_feat=self.cache[index]
+
+        else:
+            source_utt_path = self.total_valid_sample['source_utt'][index]
+            target_utt_path = self.total_valid_sample['target_utt'][index]
+            source_utt_feat=np.load(source_utt_path)
+            target_utt_feat=np.load(target_utt_path)
+
+
         return source_utt_feat,target_utt_feat
 
 
@@ -81,9 +91,9 @@ class RA_parallel_Reader_General(object):
 class parallel_dataset_Genrnal(Dataset):
 
     def __init__(self, source_utt_scp,target_utt_scp,
-                 output_per_step=2):
+                 output_per_step=2,cache_data=False):
         #output_per_step解码器每一个step输出的frame数目，输入网络的数据的frame数目必须要是这个的整数倍即seq_length%output_per_step==0
-        self.reader=RA_parallel_Reader_General(source_utt_scp,target_utt_scp)
+        self.reader=RA_parallel_Reader_General(source_utt_scp,target_utt_scp,cache_data=cache_data)
 
         source_utt_feat,target_utt_feat=self.reader.index2sample(0)
         self.source_utt_feat_dim=source_utt_feat.shape[1]
@@ -227,6 +237,39 @@ class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针�
             self.current_batch=self.dataset.collect_fn(current_batch)   #这里是给下一个batch预备的，如果下一个batch数据不足，就直接返回这个
             return self.current_batch
 
+
+
+class   infinite_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
+                                                        #长度以dataset返回的第一个.shape[0]为准，参考group_length_sorting_collate_fn函数
+    def __init__(self, dataset, batchsize, log_string=None, num_workers=4,):
+                                                            # max_batchsize_mul_max_length是指batchsize*max_length的最大值，如果超过会自动减小batchsize，这是为了防止现存爆炸,这个不能太小，否则会出错
+        self.log_string = log_string                        #min_batch_size是最小允许的batchsize，防止seq_length太长导致batchsize太小
+        self.dataset = dataset
+        self.batchsize = batchsize
+        self.dataloader = DataLoader(dataset=self.dataset,
+                                              batch_size=batchsize,
+                                              shuffle=True,
+                                              num_workers=num_workers,
+                                              drop_last=False,
+                                              collate_fn=self.dataset.collect_fn)
+
+        self.dataloader_iter=iter(self.dataloader)
+        self.epoch = 0
+
+
+
+    def next_batch(self):
+        try:
+            cb = self.dataloader_iter.next()
+        except StopIteration:
+            self.dataloader_iter = iter(self.dataloader)
+            cb = self.dataloader_iter.next()
+            if self.log_string!=None:
+                self.epoch+=1
+                print(
+                    "{},{} epoch{}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), self.log_string,
+                                           self.epoch))  # 一个epoch了
+        return cb
 
 
 
