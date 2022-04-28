@@ -77,7 +77,7 @@ for i in range(1):
 print("===============================================")
 print("average loss on training set:", "mel_loss", np.mean(train_l21loss_summary))  # 这里用来确保模型被正确的加载
 
-model.decoder.max_decoder_steps=600
+
 for uttids,source_utts,source_utts_length in eval_loader:
     source_utts = torch.from_numpy(source_utts).float()
     source_utts_length = torch.from_numpy(source_utts_length)
@@ -86,7 +86,7 @@ for uttids,source_utts,source_utts_length in eval_loader:
     with torch.no_grad():
         mel_outputs, mel_outputs_postnet, gate_outputs, alignments=model.inference(source_utts,source_utts_length)
     temp=mel_outputs_postnet.cpu().detach().numpy()
-    np.save(os.path.join(eval_result_dir, uttids[0]+".npy"),temp)
+    np.save(os.path.join(eval_result_dir, uttids[0]+".npy"),temp[0])
 
 
 
