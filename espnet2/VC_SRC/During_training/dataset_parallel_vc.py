@@ -152,7 +152,7 @@ def group_length_sorting_collate_fn(batch_list):
 
 class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
                                                         #长度以dataset返回的第一个.shape[0]为准，参考group_length_sorting_collate_fn函数
-    def __init__(self, dataset, batchsize, log_string=None, num_workers=4, batch_per_group=32,max_batchsize_mul_max_length=32*400,min_batch_size=16):
+    def __init__(self, dataset, batchsize, log_string=None, num_workers=4, batch_per_group=8,max_batchsize_mul_max_length=48*400,min_batch_size=16):
                                                             # max_batchsize_mul_max_length是指batchsize*max_length的最大值，如果超过会自动减小batchsize，这是为了防止现存爆炸,这个不能太小，否则会出错
         self.log_string = log_string                        #min_batch_size是最小允许的batchsize，防止seq_length太长导致batchsize太小
         self.dataset = dataset

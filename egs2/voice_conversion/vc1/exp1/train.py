@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 import sys
 sys.path.append('')
-from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal,infinite_dataloader
-
+from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal,infinite_dataloader,infinite_seqlength_optmized_dataloader
+from espnet2.VC_SRC.During_training.load_model import load_model_from_cpd
 import time
 import os
 from espnet2.VC_SRC.Model_component.VC_utils import change_lr
 mutationname=sys.argv[1]
+resum=int(sys.argv[2])
 from tensorboardX import SummaryWriter
 import torch
 mynn = __import__('mutation.' + mutationname, fromlist=True)
@@ -17,8 +18,8 @@ modeldir = sys.path[0]
 temp = modeldir.split('/')
 modelname = temp[-1]
 
-model_save_path = os.path.join(modeldir, 'newest_model_saved', mutationname, mutationname)
 
+checkpoint_dir=modeldir + '/newest_model_saved/' + mutationname
 loggerdir = modeldir + '/log/' + mutationname
 
 
@@ -35,13 +36,19 @@ logger=loss_logger(loggerdir)
 
 
 train_dataset=parallel_dataset_Genrnal(mynn.source_scp,mynn.target_scp, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
-train_loader=infinite_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4)
+train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4)
 
 test_dataset=parallel_dataset_Genrnal(mynn.source_scp_test,mynn.target_scp_test, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
-test_loader=infinite_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2)
+test_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2)
 
 
 model=mynn.VC_model(mynn.hparams)
+
+start_step=1
+
+if resum:
+    start_step = load_model_from_cpd(model, checkpoint_dir)
+
 
 device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -57,17 +64,21 @@ optimizer=mynn.optimizer(model.parameters(), lr=mynn.hparams.learning_rate,
 
 print("{},{}:{}, begin".format(modelname, mutationname, time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
 last_time=time.time()
-for step in range(1,mynn.hparams.total_iteration+1):
+for step in range(start_step,mynn.hparams.total_iteration+1):
     lr=mynn.getlr(step)
     change_lr(optimizer,lr)
     source_utt,source_utt_length,target_utt,target_utt_length = train_loader.next_batch()
 
 
-    if(step%100==0):#记录tensorboard数据，并且保存模型
+    if(step%10==0):#记录tensorboard数据，并且保存模型
         print("{},{}:{},delta time={}S, step{}".format(modelname,mutationname,time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),int(time.time()-last_time),step))
         last_time = time.time()
         source_utt_test,source_utt_length_test,target_utt_test,target_utt_length_test=test_loader.next_batch()
-        torch.save(model.state_dict(), model_save_path)
+        if(step%10==0):
+            print("saving model at {}".format(str(step)))
+            torch.save(model.state_dict(),
+                   modeldir + '/newest_model_saved/{}/s{}_'.format(mutationname, step) + mutationname + '.pth')
+
 
         source_utt_test=torch.from_numpy(source_utt_test).float().to(device) #vdebug
         target_utt_test=torch.from_numpy(target_utt_test).float().to(device) #vdebug

@@ -2,7 +2,7 @@
 import sys
 sys.path.append('')
 from espnet2.VC_SRC.During_training.dataset_parallel_vc import parallel_dataset_Genrnal
-
+from espnet2.VC_SRC.During_training.load_model import load_model_from_cpd
 from torch.utils.data import DataLoader
 
 
@@ -20,7 +20,7 @@ modeldir = sys.path[0]
 temp = modeldir.split('/')
 modelname = temp[-1]
 
-model_save_path = os.path.join(modeldir , 'newest_model_saved' ,mutationname,mutationname)
+checkpoint_dir=modeldir + '/newest_model_saved/' + mutationname
 eval_result_dir=os.path.join(modeldir , 'eval_results' ,mutationname)
 
 import torch
@@ -49,9 +49,8 @@ eval_loader=DataLoader(dataset=eval_dataset,
 
 model=mynn.VC_model(mynn.hparams)
 
-
-
-model.load_state_dict(torch.load(model_save_path,map_location="cpu"))
+step = load_model_from_cpd(model, checkpoint_dir)
+print("inference using step "+str(step))
 
 
 
