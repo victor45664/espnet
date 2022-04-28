@@ -70,11 +70,11 @@ for step in range(start_step,mynn.hparams.total_iteration+1):
     source_utt,source_utt_length,target_utt,target_utt_length = train_loader.next_batch()
 
 
-    if(step%10==0):#记录tensorboard数据，并且保存模型
+    if(step%100==0):#记录tensorboard数据，并且保存模型
         print("{},{}:{},delta time={}S, step{}".format(modelname,mutationname,time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),int(time.time()-last_time),step))
         last_time = time.time()
         source_utt_test,source_utt_length_test,target_utt_test,target_utt_length_test=test_loader.next_batch()
-        if(step%10==0):
+        if(step%10000==0):
             print("saving model at {}".format(str(step)))
             torch.save(model.state_dict(),
                    modeldir + '/newest_model_saved/{}/s{}_'.format(mutationname, step) + mutationname + '.pth')
