@@ -36,10 +36,10 @@ logger=loss_logger(loggerdir)
 
 
 train_dataset=parallel_dataset_Genrnal(mynn.source_scp,mynn.target_scp, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
-train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4)
+train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4,max_batchsize_mul_max_length=32*400)
 
 test_dataset=parallel_dataset_Genrnal(mynn.source_scp_test,mynn.target_scp_test, output_per_step=mynn.hparams.n_frames_per_step,cache_data=True)
-test_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2)
+test_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,num_workers=2,max_batchsize_mul_max_length=32*400)
 
 
 model=mynn.VC_model(mynn.hparams)
