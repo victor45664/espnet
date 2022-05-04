@@ -19,7 +19,8 @@ python  -u $(dirname $0)/train.py $mutation 0 || exit 1;
 
 
 else
-
+mkdir -p $(dirname $0)/log
+mkdir -p $(dirname $0)/newest_model_saved/$mutation
 echo "resume training"
 python  -u  $(dirname $0)/train.py $mutation 1 || exit 1;
 
