@@ -56,7 +56,8 @@ print("inference using step "+str(step))
 
 train_loader_iter=iter(train_loader)
 model.eval()
-train_l21loss_summary=[]
+train_total_loss_summary=[]
+train_melloss_summary=[]
 for i in range(1):
     try:
         source_utt,source_utt_length,target_utt,target_utt_length=train_loader_iter.next()
@@ -71,10 +72,10 @@ for i in range(1):
     with torch.no_grad():
         total_loss, mel_final, state = model(source_utt, source_utt_length, target_utt, target_utt_length)
     print("loss on training set:","total_loss",total_loss)#这里用来确保模型被正确的加载,但是这里正确只能证明参数读取正确，如果inference写错输出结果一样会出问题
-    train_l21loss_summary.append(total_loss.item())
-
+    train_total_loss_summary.append(total_loss.item())
+    train_melloss_summary.append(state["mel_loss_final"].item())
 print("===============================================")
-print("average loss on training set:", "mel_loss", np.mean(train_l21loss_summary))  # 这里用来确保模型被正确的加载
+print("average loss on training set:", np.mean(train_total_loss_summary),"mel_loss", np.mean(train_melloss_summary))  # 这里用来确保模型被正确的加载
 
 
 for uttids,source_utts,source_utts_length in eval_loader:

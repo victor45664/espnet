@@ -10,6 +10,8 @@ def get_step_from_checkpoint(fname):
     return int(fname.split("_")[0][1:])
 
 def load_model_from_cpd(Model,chekpoint_dir):
+    if not os.path.exists(chekpoint_dir):
+        return 1
     checkpoints=os.listdir(chekpoint_dir)
     newest_step=0
     newest_model_fname=""
@@ -19,7 +21,7 @@ def load_model_from_cpd(Model,chekpoint_dir):
             newest_step=step
             newest_model_fname=checkpoint
     if newest_model_fname=="":
-        return 0
+        return 1
     else:
         print("resuming at step",newest_step)
         newest_model_savepath=os.path.join(chekpoint_dir,newest_model_fname)
