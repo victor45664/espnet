@@ -7,7 +7,7 @@ import pandas as pd
 
 import threading
 import numpy as np
-
+import kaldi_io
 
 def change_length(input_feat,disired_length):
     current_length=input_feat.shape[0]
@@ -77,9 +77,15 @@ class RA_parallel_Reader_General(object):
         else:
             source_utt_path = self.total_valid_sample['source_utt'][index]
             target_utt_path = self.total_valid_sample['target_utt'][index]
-            source_utt_feat=np.load(source_utt_path)
-            target_utt_feat=np.load(target_utt_path)
+            try:
+                source_utt_feat = np.load(source_utt_path)
+            except:
+                source_utt_feat = kaldi_io.read_mat(source_utt_path)
 
+            try:
+                target_utt_feat = np.load(target_utt_path)
+            except:
+                target_utt_feat = kaldi_io.read_mat(target_utt_path)
 
         return source_utt_feat,target_utt_feat
 

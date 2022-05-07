@@ -24,7 +24,7 @@ def create_hparams():
         ################################
         # Model Parameters             #
         ################################
-        prenet_depths=[ 512, 256 ], #这是decoder里面的prenent
+
         encoder_embedding_dim=-1, #必须等于prenet_dim，在下面赋值
 
         # Encoder parameters

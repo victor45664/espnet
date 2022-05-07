@@ -30,7 +30,7 @@ np.random.seed(0)
 random.seed(0)
 train_dataset=parallel_dataset_Genrnal(mynn.source_scp,mynn.target_scp, output_per_step=mynn.hparams.n_frames_per_step)
 train_loader=DataLoader(dataset=train_dataset,
-                                  batch_size=mynn.hparams.batchsize,
+                                 batch_size=1,
                                   shuffle=True,
                                   num_workers=0,
                                   drop_last=True,
@@ -58,12 +58,12 @@ train_loader_iter=iter(train_loader)
 model.eval()
 train_total_loss_summary=[]
 train_melloss_summary=[]
-for i in range(1):
+for i in range(0):
     try:
         source_utt,source_utt_length,target_utt,target_utt_length=train_loader_iter.next()
     except StopIteration:
         train_loader_iter = iter(train_loader)
-
+        source_utt, source_utt_length, target_utt, target_utt_length = train_loader_iter.next()
     source_utt = torch.from_numpy(source_utt).float()
     source_utt_length = torch.from_numpy(source_utt_length)
     target_utt = torch.from_numpy(target_utt).float()
