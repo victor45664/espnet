@@ -13,7 +13,7 @@ def load_model_from_cpd(Model,chekpoint_dir):
     if not os.path.exists(chekpoint_dir):
         return 1
     checkpoints=os.listdir(chekpoint_dir)
-    newest_step=0
+    newest_step=1
     newest_model_fname=""
     for checkpoint in checkpoints:
         step=get_step_from_checkpoint(checkpoint)
