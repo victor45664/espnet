@@ -50,8 +50,8 @@ def _round_up(length, multiple):
 
 class RA_parallel_Reader_General(object):
     def __init__(self, source_utt_scp_file_path, target_utt_scp_file_path,cache_data=False):
-        source_utt_scp=pd.read_csv(target_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'source_utt'])
-        target_utt_scp=pd.read_csv(source_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'target_utt'])
+        source_utt_scp=pd.read_csv(source_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'source_utt'])
+        target_utt_scp=pd.read_csv(target_utt_scp_file_path, header=None, delim_whitespace=True, names=['key', 'target_utt'])
         print("find {} source_utt".format(len(source_utt_scp)))
         print("find {} target_utt".format(len(target_utt_scp)))
         total_training_sample=pd.merge(source_utt_scp,target_utt_scp,how='outer',on='key')
