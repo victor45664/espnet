@@ -813,7 +813,7 @@ class Transformer(TTSInterface, torch.nn.Module):
                 {"decoder_alpha": self.decoder.embed[-1].alpha.data.item()},
             ]
         self.reporter.report(report_keys)
-
+        self.vdebug_state=report_keys
         return loss
 
     def inference(self, x, inference_args, spemb=None, *args, **kwargs):
