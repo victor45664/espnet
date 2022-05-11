@@ -462,7 +462,7 @@ class Tacotron2(TTSInterface, torch.nn.Module):
                 dropout_rate=args.dropout_rate,
             )
             self.src_reconstructor_linear = torch.nn.Linear(
-                args.econv_chans, idim * args.encoder_reduction_factor
+                args.eunits, idim * args.encoder_reduction_factor
             )
 
             self.src_reconstruction_loss = CBHGLoss(use_masking=args.use_masking)
@@ -480,7 +480,7 @@ class Tacotron2(TTSInterface, torch.nn.Module):
                 dropout_rate=args.dropout_rate,
             )
             self.trg_reconstructor_linear = torch.nn.Linear(
-                args.econv_chans, odim * args.reduction_factor
+                args.eunits, odim * args.reduction_factor
             )
             self.trg_reconstruction_loss = CBHGLoss(use_masking=args.use_masking)
 
@@ -543,6 +543,7 @@ class Tacotron2(TTSInterface, torch.nn.Module):
         # calculate src reconstruction
         if self.src_reconstruction_loss_lambda > 0:
             B, _in_length, _adim = hs.shape
+
             xt, xtlens = self.src_reconstructor(hs, hlens)
             xt = self.src_reconstructor_linear(xt)
             if self.encoder_reduction_factor > 1:
