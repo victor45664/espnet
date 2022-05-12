@@ -15,8 +15,8 @@ from espnet.nets.beam_search_intersect import Hypothesis
 import numpy as np
 
 def intersect_fusion(acoustic_score, lm_score,topk=100):
-    acoustic_score_topk_ids = torch.topk(acoustic_score, topk, dim=-1).indices.numpy()
-    lm_score_topk_ids = torch.topk(lm_score, topk, dim=-1).indices.numpy()
+    acoustic_score_topk_ids = torch.topk(acoustic_score, topk, dim=-1).indices.cpu().numpy()
+    lm_score_topk_ids = torch.topk(lm_score, topk, dim=-1).indices.cpu().numpy()
 
     intersection=np.intersect1d(acoustic_score_topk_ids, lm_score_topk_ids)
     fused_score=acoustic_score+lm_score
