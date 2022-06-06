@@ -207,7 +207,7 @@ class Speech2Text:
             eos=asr_model.eos,
             vocab_size=len(token_list),
             token_list=token_list,
-            pre_beam_score_key=None if ctc_weight == 1.0 else "full",
+            pre_beam_score_key=None if float(ctc_weight) == 1.0 else "full",
         )
         # TODO(karita): make all scorers batchfied
         if batch_size == 1:
