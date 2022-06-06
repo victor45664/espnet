@@ -56,7 +56,10 @@ class GridsearchWeights(object):
                 str_param+=key+"_"+str(weight[key])+"_"
             weight["str_param"]=str_param[:-1]   #当前参数组合的文本表示
             weight["decoder"] = 1.0 - weight["ctc"]   #decoder输出的权重
-            weight["ilm"] = weight["decoder"]*weight["ilm"]  #ilm 的权重是相对于attention分数的权重
+            if abs(weight["decoder"])<=0.0001:
+                weight["ilm"] = weight["ilm"]  #decoder权重为0，因此使用ilm本来的权重
+            else:
+                weight["ilm"] = weight["decoder"]*weight["ilm"]  #ilm 的权重是相对于attention分数的权重
             self.weights.append(weight)
 
     def __len__(self):

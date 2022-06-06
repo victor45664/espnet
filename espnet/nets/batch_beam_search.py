@@ -154,6 +154,9 @@ class BatchBeamSearch(BeamSearch):
         scores = dict()
         states = dict()
         for k, d in self.full_scorers.items():
+            if abs(self.weights[k])<=0.00001:
+                scores[k], states[k]=torch.zeros((len(hyp),self.n_vocab), dtype=x.dtype, device=x.device),torch.zeros((len(hyp)), dtype=x.dtype, device=x.device)
+                continue
             scores[k], states[k] = d.batch_score(hyp.yseq, hyp.states[k], x)
         return scores, states   #log分数求和
 
@@ -223,6 +226,8 @@ class BatchBeamSearch(BeamSearch):
         )
         scores, states = self.score_full(running_hyps, x.expand(n_batch, *x.shape))
         for k in self.full_scorers:
+            if abs(self.weights[k])<=0.00001:  #weight is zero don't inference
+                continue
             weighted_scores += self.weights[k] * scores[k]
         # partial scoring
         if self.do_pre_beam:
