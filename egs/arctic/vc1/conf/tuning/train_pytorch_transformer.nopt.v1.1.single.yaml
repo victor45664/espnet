@@ -57,7 +57,7 @@ modules-applied-guided-attn: ["encoder-decoder"]
 guided-attn-loss-lambda: 10
 
 # optimization related
-opt: lamb
+opt: adam
 lr: 0.001
 accum-grad: 2
 grad-clip: 1.0
