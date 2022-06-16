@@ -372,7 +372,7 @@ class BeamSearch(torch.nn.Module):
             # post process of one iteration
             running_hyps = self.post_process(i, maxlen, maxlenratio, best, ended_hyps)
             # end detection
-            if maxlenratio == 0.0 and end_detect([h.asdict() for h in ended_hyps], i):
+            if end_detect([h.asdict() for h in ended_hyps], i):
                 logging.info(f"end detected at {i}")
                 break
             if len(running_hyps) == 0:
