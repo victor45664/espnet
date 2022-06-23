@@ -26,7 +26,7 @@ from espnet2.asr.specaug.abs_specaug import AbsSpecAug
 from espnet2.layers.abs_normalize import AbsNormalize
 from espnet2.torch_utils.device_funcs import force_gatherable
 from espnet2.train.abs_espnet_model import AbsESPnetModel
-
+from torch.distributions.categorical import Categorical
 if LooseVersion(torch.__version__) >= LooseVersion("1.6.0"):
     from torch.cuda.amp import autocast
 else:
@@ -975,3 +975,199 @@ class ESPnetASRModel_kd(ESPnetASRModel):
                                  torch.nn.functional.softmax(teacher_outputs / self.kd_T, dim=1)) * ( self.kd_alpha * self.kd_T * self.kd_T) + \
                   torch.nn.functional.cross_entropy(outputs, labels) * (1. -  self.kd_alpha)
         return KD_loss
+
+
+class ESPnetASRModel_unaug(ESPnetASRModel):
+
+    def forward(
+        self,
+        speech: torch.Tensor,
+        speech_lengths: torch.Tensor,
+        text: torch.Tensor,
+        text_lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor], torch.Tensor]:
+        """Frontend + Encoder + Decoder + Calc loss
+
+        Args:
+            speech: (Batch, Length, ...)
+            speech_lengths: (Batch, )
+            text: (Batch, Length)
+            text_lengths: (Batch,)
+        """
+        assert text_lengths.dim() == 1, text_lengths.shape
+        # Check that batch_size is unified
+        assert (
+            speech.shape[0]
+            == speech_lengths.shape[0]
+            == text.shape[0]
+            == text_lengths.shape[0]
+        ), (speech.shape, speech_lengths.shape, text.shape, text_lengths.shape)
+        batch_size = speech.shape[0]
+
+        # for data-parallel
+        text = text[:, : text_lengths.max()]
+
+        # 1. Encoder
+        encoder_out, encoder_out_lens = self.encode(speech, speech_lengths)
+
+        # 2a. Attention-decoder branch
+        if self.ctc_weight == 1.0:
+            loss_att, acc_att, cer_att, wer_att = None, None, None, None
+        else:
+            loss_att, acc_att, cer_att, wer_att,unaug_loss = self._calc_att_loss(
+                encoder_out, encoder_out_lens, text, text_lengths
+            )
+
+        # 2b. CTC branch
+        if self.ctc_weight == 0.0:
+            loss_ctc, cer_ctc = None, None
+        else:
+            loss_ctc, cer_ctc = self._calc_ctc_loss(
+                encoder_out, encoder_out_lens, text, text_lengths
+            )
+
+        # 2c. RNN-T branch
+        if self.rnnt_decoder is not None:
+            _ = self._calc_rnnt_loss(encoder_out, encoder_out_lens, text, text_lengths)
+
+        if self.ctc_weight == 0.0:
+            loss = loss_att
+        elif self.ctc_weight == 1.0:
+            loss = loss_ctc
+        else:
+            loss = self.ctc_weight * loss_ctc + (1 - self.ctc_weight) * loss_att
+        loss+=self.unaug_conf["unaug_loss_weight"]*unaug_loss
+
+        stats = dict(
+            loss=loss.detach(),
+            loss_att=loss_att.detach() if loss_att is not None else None,
+            loss_ctc=loss_ctc.detach() if loss_ctc is not None else None,
+            unaug_loss=unaug_loss.detach(),
+            acc=acc_att,
+            cer=cer_att,
+            wer=wer_att,
+            cer_ctc=cer_ctc,
+        )
+
+        # force_gatherable: to-device and to-tensor if scalar for DataParallel
+        loss, stats, weight = force_gatherable((loss, stats, batch_size), loss.device)
+        return loss, stats, weight
+
+    def _calc_att_loss(
+        self,
+        encoder_out: torch.Tensor,
+        encoder_out_lens: torch.Tensor,
+        ys_pad: torch.Tensor,
+        ys_pad_lens: torch.Tensor,
+    ):
+        ys_in_pad, ys_out_pad = add_sos_eos(ys_pad, self.sos, self.eos, self.ignore_id)
+        ys_in_lens = ys_pad_lens + 1
+
+        # 1. Forward decoder
+        decoder_out, _ = self.decoder(
+            encoder_out, encoder_out_lens, ys_in_pad, ys_in_lens
+        )
+
+        # 2. Compute attention loss
+        loss_att = self.criterion_att(decoder_out, ys_out_pad)
+        acc_att = th_accuracy(
+            decoder_out.view(-1, self.vocab_size),
+            ys_out_pad,
+            ignore_label=self.ignore_id,
+        )
+
+        # Compute cer/wer using attention-decoder
+        if self.training or self.error_calculator is None:
+            cer_att, wer_att = None, None
+        else:
+            ys_hat = decoder_out.argmax(dim=-1)
+            cer_att, wer_att = self.error_calculator(ys_hat.cpu(), ys_pad.cpu())
+
+
+        # 3. Compute unaug loss
+        #3.1 生成替换后的ys
+        with torch.no_grad():
+            replaced_ys_in_pad,unaug_mask=self.replace_ys(ys_pad,ys_pad_lens-1,decoder_out)
+            #unaug_mask True的地方是需要使用un kl训练的，
+
+
+
+
+
+
+        # 3.2 forward decoder with ys with errors
+        unaug_decoder_out, _ = self.decoder(
+            encoder_out, encoder_out_lens, replaced_ys_in_pad, ys_in_lens
+        )
+
+        #3.3 cal unaug_loss
+        unaug_loss=self.__cal_unaug_loss(unaug_decoder_out,unaug_mask)
+
+
+        return loss_att, acc_att, cer_att, wer_att,unaug_loss
+
+
+    def __cal_unaug_loss(self,unaug_decoder_out,mask):
+        with torch.no_grad():
+            un_dist = unaug_decoder_out.clone()
+            un_dist.fill_(1 / self.vocab_size)  #生成均匀分布
+
+
+        batch_size = unaug_decoder_out.size(0)
+        T = unaug_decoder_out.size(1)
+        unaug_decoder_out = unaug_decoder_out.view(-1, self.vocab_size)
+        unaug_loss_all=torch.nn.functional.kl_div(torch.log_softmax(unaug_decoder_out, dim=1), un_dist.view(-1,self.vocab_size), reduction="none")
+        total=mask.sum()
+
+        return unaug_loss_all.masked_fill(~mask.view(batch_size*T,-1), 0).sum() / total
+
+    def replace_ys(self,ys_pad,ys_pad_lens,decoder_out):
+        #注意 ys_pad_lens 应该是原始长度
+        # 通过将ys替换成decoder_out中预测概率较高的前几个符号，来生成假的ys。保留ground_truth的概率是replace_p[0]
+                    #替换为decoder_out中预测概率第二高的概率是replace_p[1]（训练快结束的时候decoder_out预测概率最高的通常就是ground_truth）
+                    #替换为decoder_out中预测概率第三高的概率是replace_p[2]
+                    #值得注意的是有时候ground_truth会在decoder_out 第二或者第三的位置，此时不进行增强，因此实际的替换概率会略低于replace_p[0]。
+
+        B = ys_pad.size(0)
+        max_source_length = ys_pad.size(1)
+
+        replace_P = self.unaug_conf["replace_p"]
+
+        decoder_out_sort = decoder_out.argsort(dim=-1, descending=True)  # 返回的是index
+
+        m = Categorical(torch.tensor(replace_P))
+        gg = m.sample((B, max_source_length))
+        replaced_ys_pad = torch.gather(decoder_out_sort, dim=-1, index=gg.view(B, max_source_length, 1)).view(B,
+                                                                                                              max_source_length) #替换为decoder_out中概率最大的前几
+        replaced_ys_pad = torch.where(gg != 0, replaced_ys_pad.view(B, max_source_length), ys_pad)  # gg为0的时候不替换
+        augmentd_mask = replaced_ys_pad != ys_pad  # 虽然进行了替换，但是依然有替换后与ground_truth相同的可能。因此与ground_truth不同的才是真的增强过的
+        # augmentd_mask=gg!=0
+
+        # print("replace rate",augmentd_mask.sum()/(B* max_source_length))
+        # for i in range(B):
+        #     for j in range(max_source_length):
+        #         if replaced_ys_pad[i][j]!=ys_pad[i][j]:
+        #             assert replaced_ys_pad[i][j]==decoder_out_sort[i][j][gg[i][j]]
+        #             assert augmentd_mask[i][j]==True
+        #         else:
+        #             assert augmentd_mask[i][j] == False
+        #         # 验证代码
+        replaced_ys_pad_in,_=add_sos_eos(replaced_ys_pad, self.sos, self.eos, self.ignore_id)
+
+
+
+        no_replace_length=torch.argmax(augmentd_mask.int(), dim=1)  # 没有被替换的长度argmax 只会返回最靠近开始的最大值，利用这个特性可以计算出出现替换前bpe序列的长度
+
+        unaug_sample = torch.sum(augmentd_mask, dim=1).bool()  #没有发生替换的样本
+
+
+        ids = torch.arange(0, max_source_length, device=ys_pad_lens.device)
+        mask1 = (ids <= ys_pad_lens.unsqueeze(1)).bool()
+        mask2 = (ids >= no_replace_length.unsqueeze(1)).bool()
+        mask = mask1 * mask2 * unaug_sample.view(-1, 1)
+        mask=torch.nn.functional.pad(input=mask, pad=(1,0), mode='constant', value=False)
+
+        mask.to(decoder_out.device)
+        replaced_ys_pad_in = replaced_ys_pad_in.to(ys_pad.device)
+
+        return replaced_ys_pad_in,mask  #替换后的ys，已经计算loss时使用的mask，只有mask为True的地方需要计算un loss
