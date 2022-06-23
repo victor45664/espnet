@@ -1137,6 +1137,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
 
         m = Categorical(torch.tensor(replace_P))
         gg = m.sample((B, max_source_length))
+        gg=gg.to(decoder_out_sort.device)
         replaced_ys_pad = torch.gather(decoder_out_sort, dim=-1, index=gg.view(B, max_source_length, 1)).view(B,
                                                                                                               max_source_length) #替换为decoder_out中概率最大的前几
         replaced_ys_pad = torch.where(gg != 0, replaced_ys_pad.view(B, max_source_length), ys_pad)  # gg为0的时候不替换
