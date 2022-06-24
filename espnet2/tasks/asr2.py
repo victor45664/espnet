@@ -780,6 +780,7 @@ class ASRTask_unaug(ASRTask):
 
         #10. unaug conf
         model.unaug_conf=args.unaug_conf
+        model.reserve_error=False if "reserve_error" not in args.unaug_conf else args.unaug_conf["reserve_error"]  #默认False
 
 
 

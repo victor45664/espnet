@@ -1014,7 +1014,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         if self.ctc_weight == 1.0:
             loss_att, acc_att, cer_att, wer_att = None, None, None, None
         else:
-            loss_att, acc_att, cer_att, wer_att,unaug_loss = self._calc_att_loss(
+            loss_att, acc_att, cer_att, wer_att,unaug_loss,replace_rate = self._calc_att_loss(
                 encoder_out, encoder_out_lens, text, text_lengths
             )
 
@@ -1043,6 +1043,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
             loss_att=loss_att.detach() if loss_att is not None else None,
             loss_ctc=loss_ctc.detach() if loss_ctc is not None else None,
             unaug_loss=unaug_loss.detach(),
+            replace_rate=replace_rate.detach(),
             acc=acc_att,
             cer=cer_att,
             wer=wer_att,
@@ -1087,7 +1088,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         # 3. Compute unaug loss
         #3.1 生成替换后的ys
         with torch.no_grad():
-            replaced_ys_in_pad,unaug_mask=self.replace_ys(ys_pad,ys_pad_lens-1,decoder_out)
+            replaced_ys_in_pad,unaug_mask,replace_rate=self.replace_ys(ys_pad,ys_pad_lens,decoder_out)
             #unaug_mask True的地方是需要使用un kl训练的，
 
 
@@ -1104,7 +1105,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         unaug_loss=self.__cal_unaug_loss(unaug_decoder_out,unaug_mask)
 
 
-        return loss_att, acc_att, cer_att, wer_att,unaug_loss
+        return loss_att, acc_att, cer_att, wer_att,unaug_loss,replace_rate
 
 
     def __cal_unaug_loss(self,unaug_decoder_out,mask):
@@ -1140,8 +1141,15 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         gg=gg.to(decoder_out_sort.device)
         replaced_ys_pad = torch.gather(decoder_out_sort, dim=-1, index=gg.view(B, max_source_length, 1)).view(B,
                                                                                                               max_source_length) #替换为decoder_out中概率最大的前几
-        replaced_ys_pad = torch.where(gg != 0, replaced_ys_pad.view(B, max_source_length), ys_pad)  # gg为0的时候不替换
+        if not self.reserve_error:
+            replaced_ys_pad = torch.where(gg != 0, replaced_ys_pad.view(B, max_source_length), ys_pad)  # gg为0的时候不替换,因为decoder_out可能存在错误，rank0不一定正确
+                                                                                                        #如果时从头训练reserve_error应该设置为False，因为会有大量的错误导致过多的替换
+                                                                                                        #但是在训练的后期或者finetune可以设置为True，因为可以保留decoder_out的错误，更好的模拟真实情况。
+
+
         augmentd_mask = replaced_ys_pad != ys_pad  # 虽然进行了替换，但是依然有替换后与ground_truth相同的可能。因此与ground_truth不同的才是真的增强过的
+        replace_rate=torch.sum(augmentd_mask) / torch.sum(ys_pad_lens)
+
         # augmentd_mask=gg!=0
 
         # print("replace rate",augmentd_mask.sum()/(B* max_source_length))
@@ -1163,7 +1171,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
 
 
         ids = torch.arange(0, max_source_length, device=ys_pad_lens.device)
-        mask1 = (ids <= ys_pad_lens.unsqueeze(1)).bool()
+        mask1 = (ids < ys_pad_lens.unsqueeze(1)).bool()
         mask2 = (ids >= no_replace_length.unsqueeze(1)).bool()
         mask = mask1 * mask2 * unaug_sample.view(-1, 1)
         mask=torch.nn.functional.pad(input=mask, pad=(1,0), mode='constant', value=False)
@@ -1171,4 +1179,4 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         mask.to(decoder_out.device)
         replaced_ys_pad_in = replaced_ys_pad_in.to(ys_pad.device)
 
-        return replaced_ys_pad_in,mask  #替换后的ys，已经计算loss时使用的mask，只有mask为True的地方需要计算un loss
+        return replaced_ys_pad_in,mask,replace_rate  #替换后的ys，已经计算loss时使用的mask，只有mask为True的地方需要计算un loss
