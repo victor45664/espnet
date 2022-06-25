@@ -1148,7 +1148,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
 
 
         augmentd_mask = replaced_ys_pad != ys_pad  # 虽然进行了替换，但是依然有替换后与ground_truth相同的可能。因此与ground_truth不同的才是真的增强过的
-        replace_rate=torch.sum(augmentd_mask) / torch.sum(ys_pad_lens)
+
 
         # augmentd_mask=gg!=0
 
@@ -1176,7 +1176,12 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         mask = mask1 * mask2 * unaug_sample.view(-1, 1)
         mask=torch.nn.functional.pad(input=mask, pad=(1,0), mode='constant', value=False)
 
-        mask.to(decoder_out.device)
+
+        replace_rate=torch.sum(augmentd_mask*mask2) / torch.sum(ys_pad_lens)
+
+
+
+
         replaced_ys_pad_in = replaced_ys_pad_in.to(ys_pad.device)
 
         return replaced_ys_pad_in,mask,replace_rate  #替换后的ys，已经计算loss时使用的mask，只有mask为True的地方需要计算un loss
