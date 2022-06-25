@@ -1177,7 +1177,7 @@ class ESPnetASRModel_unaug(ESPnetASRModel):
         mask=torch.nn.functional.pad(input=mask, pad=(1,0), mode='constant', value=False)
 
 
-        replace_rate=torch.sum(augmentd_mask*mask2) / torch.sum(ys_pad_lens)
+        replace_rate=torch.sum(augmentd_mask*mask1) / torch.sum(ys_pad_lens)
 
 
 
