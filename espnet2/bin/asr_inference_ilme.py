@@ -478,7 +478,7 @@ def inference(
 
             for ri in range(len(speech2text.gridsearchweights)):
                 results=gridesearchresults[ri]
-                subwriter=writer[speech2text.gridsearchweights[ri]["str_param"]]
+                subwriter=writer[speech2text.gridsearchweights[ri]["str_param"]+"_bs_"+str(speech2text.beam_search.beam_size)]
                 for n, (text, token, token_int, hyp) in zip(range(1, nbest + 1), results):
                     # Create a directory: outdir/{n}best_recog
                     ibest_writer = subwriter[f"{n}best_recog"]
