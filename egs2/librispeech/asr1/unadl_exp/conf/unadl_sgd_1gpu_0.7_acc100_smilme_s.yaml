@@ -1,0 +1,92 @@
+# Trained with Tesla V100-SXM2(32GB) x 8 GPUs. It takes about 1.5 days.
+#numofgpu: 1
+batch_type: numel
+batch_bins: 30000000
+accum_grad: 100
+patience: none
+init: none
+best_model_criterion:
+-   - valid
+    - acc
+    - max
+keep_nbest_models: 10
+
+encoder: conformer
+encoder_conf:
+    output_size: 512
+    attention_heads: 8
+    linear_units: 2048
+    num_blocks: 12
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    attention_dropout_rate: 0.1
+    input_layer: conv2d
+    normalize_before: true
+    macaron_style: true
+    pos_enc_layer_type: "rel_pos"
+    rel_pos_type: "latest"    #vdebug
+    selfattention_layer_type: "rel_selfattn"
+    activation_type: "swish"
+    use_cnn_module:  true
+    cnn_module_kernel: 31
+
+decoder: transformer
+decoder_conf:
+    attention_heads: 8
+    linear_units: 2048
+    num_blocks: 6
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    self_attention_dropout_rate: 0.1
+    src_attention_dropout_rate: 0.1
+max_epoch: 16       #通常ilme只需要一个epoch或者更少
+num_att_plot: 0  
+ilme_conf:                 #ilme 的配置
+    tsf_share: true
+    ilmetype: acl
+    acllayers:
+    - 32
+    - 32
+    aclactivations:    
+    - leaky_relu
+    - leaky_relu
+    - none
+    freeze_encoder: true     #在进行对抗训练的时候是否冻结encoder,默认冻结
+    adl_begin_loss: 400      #当ilm loss小于这个数的时候才进行对抗训练
+    adl_factor: 0.7          #对抗训练loss和attention loss的比例
+    ilme_param_lr_factor: 10 #由于finetune的时候学习率非常低，因此需要对ilme参数的更新量进行放大
+    
+init_param: 
+    - /home/projects/12001458/yufei/espnet/egs2/librispeech/asr1/exp/downmodel/asr_train_asr_conformer6_n_fft512_hop_length256_raw_en_bpe5000_scheduler_confwarmup_steps40000_optim_conflr0.0025_sp/valid.acc.ave_10best.pth
+    #从训练完的las模型，初始化
+model_conf:
+    ctc_weight: 0.3
+    lsm_weight: 0.1
+    length_normalized_loss: false
+
+optim: sgd
+optim_conf:
+    lr: 0.0015
+scheduler: exponentiallr
+scheduler_conf:
+    gamma: 0.9999
+
+frontend_conf:
+  n_fft: 512
+  hop_length: 256
+
+specaug: specaug
+specaug_conf:
+    apply_time_warp: true
+    time_warp_window: 5
+    time_warp_mode: bicubic
+    apply_freq_mask: true
+    freq_mask_width_range:
+    - 0
+    - 30
+    num_freq_mask: 2
+    apply_time_mask: true
+    time_mask_width_range:
+    - 0
+    - 40
+    num_time_mask: 2
