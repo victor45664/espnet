@@ -1,0 +1,92 @@
+# 
+#numofgpu: 1
+num_att_plot: 0 
+batch_type: numel
+batch_bins: 30000000
+accum_grad: 10
+max_epoch: 35
+patience: none
+init: none
+best_model_criterion:
+-   - valid
+    - acc
+    - max
+keep_nbest_models: 10
+
+init_param: 
+    - /home/projects/12001458/yufei/espnet/egs2/librispeech/asr1/exp/downmodel/asr_train_asr_conformer6_n_fft512_hop_length256_raw_en_bpe5000_scheduler_confwarmup_steps40000_optim_conflr0.0025_sp/valid.acc.ave_10best.pth
+    #从训练完的las模型，这里只初始化encoder的参数
+
+unaug_conf:                 
+    freeze_encoder: true     #是否冻结encoder,默认冻结
+    replace_p:              # 进行增强的时候的替换概率设置
+    - 0.95                   #  不进行替换的概率（使用ground truth）
+    - 0.025                   #  替换为decoder预测输出概率第二大的符号
+    - 0.0125                   #  替换为decoder预测输出概率第三大的符号，以此类推。值得注意的是有时候ground truth并不在预测概率最大的位置，此时不进行增强，因此实际的增强概率会略低于设置。
+    - 0.00625                   #  替换为decoder预测输出概率第四大的符号，以此类推。值得注意的是有时候ground truth并不在预测概率最大的位置，此时不进行增强，因此实际的增强概率会略低于设置。
+    - 0.00625                   #  替换为decoder预测输出概率第五大的符号，以此类推。值得注意的是有时候ground truth并不在预测概率最大的位置，此时不进行增强，因此实际的增强概率会略低于设置。
+    unaug_loss_weight: 0.2   #损失函数的权重
+    reserve_error: true      #保留decoder_out预测出的错误。
+                             #如果时从头训练reserve_error应该设置为False，因为会有大量的错误导致过多的替换
+                             #但是在训练的后期或者finetune可以设置为True，因为可以保留decoder_out的错误，更好的模拟真实情况。
+    
+encoder: conformer
+encoder_conf:
+    output_size: 512
+    attention_heads: 8
+    linear_units: 2048
+    num_blocks: 12
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    attention_dropout_rate: 0.1
+    input_layer: conv2d
+    normalize_before: true
+    macaron_style: true
+    pos_enc_layer_type: "rel_pos"
+    rel_pos_type: "latest"    #vdebug
+    selfattention_layer_type: "rel_selfattn"
+    activation_type: "swish"
+    use_cnn_module:  true
+    cnn_module_kernel: 31
+
+decoder: transformer
+decoder_conf:
+    attention_heads: 8
+    linear_units: 2048
+    num_blocks: 6
+    dropout_rate: 0.1
+    positional_dropout_rate: 0.1
+    self_attention_dropout_rate: 0.1
+    src_attention_dropout_rate: 0.1
+
+model_conf:
+    ctc_weight: 0.3
+    lsm_weight: 0.1
+    length_normalized_loss: false
+
+optim: adam
+optim_conf:
+    lr: 0.0015
+scheduler: warmuplr
+scheduler_conf:
+    warmup_steps: 250
+
+frontend_conf:
+  n_fft: 512
+  hop_length: 256
+
+specaug: specaug
+specaug_conf:
+    apply_time_warp: true
+    time_warp_window: 5
+    time_warp_mode: bicubic
+    apply_freq_mask: true
+    freq_mask_width_range:
+    - 0
+    - 30
+    num_freq_mask: 2
+    apply_time_mask: true
+    time_mask_width_range:
+    - 0
+    - 40
+    num_time_mask: 2
