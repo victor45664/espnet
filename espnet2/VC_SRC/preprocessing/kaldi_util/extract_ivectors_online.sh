@@ -85,7 +85,7 @@ mkdir -p $dir/log $dir/conf
 
 sdata=$data/split$nj;
 [[ -d $sdata && $data/feats.scp -ot $sdata ]] || ppg_extractor/split_data.sh $data $nj || exit 1;
-#VC_utils/split_data.sh $data $nj || exit 1;
+#utils/split_data.sh $data $nj || exit 1;
 
 echo $ivector_period > $dir/ivector_period || exit 1;
 splice_opts=$(cat $srcdir/splice_opts)
