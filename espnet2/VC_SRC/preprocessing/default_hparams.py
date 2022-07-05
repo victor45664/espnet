@@ -1,4 +1,4 @@
-from espnet2.VC_SRC.VC_utils import HParams
+from espnet2.VC_SRC.Model_component.default_hparams import HParams
 
 
 # Default hyperparameters:

@@ -3,7 +3,7 @@
 import sys
 sys.path.append('')
 
-from espnet2.VC_SRC import melspectrogram,load_wav
+from espnet2.VC_SRC.preprocessing.audio import melspectrogram,load_wav
 import numpy as np
 import os
 import pandas as pd
