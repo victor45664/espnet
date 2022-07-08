@@ -17,7 +17,7 @@ current_dir=$(dirname $0)
 data_dir=$current_dir/data_20spk   #输出的文件夹
 
 
-stage=5
+stage=0
 
 
 
