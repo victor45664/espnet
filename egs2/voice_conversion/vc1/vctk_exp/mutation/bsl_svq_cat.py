@@ -84,6 +84,9 @@ class VC_model(nn.Module):
         state={}
         state["mel_loss"]=mel_loss
         state["mel_loss_final"]=mel_loss_final
+        state["hist"]= {}
+        state["hist"]["weight"]= weight
+
         return total_loss,mel_outputs_postnet,state
 
 
