@@ -4,7 +4,7 @@ import librosa.filters
 
 import numpy as np
 from scipy import signal
-from default_hparams import hparams_for_preprocessing as hparams
+from espnet2.VC_SRC.preprocessing.default_hparams import hparams_for_preprocessing as hparams
 
 def load_wav(path):
   return librosa.core.load(path, sr=hparams.target_sample_rate)[0]

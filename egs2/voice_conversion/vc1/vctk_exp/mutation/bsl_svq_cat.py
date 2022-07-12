@@ -95,10 +95,12 @@ class VC_model(nn.Module):
     def inference(self, BN_feat,seq_length,speaker_id):
 
         encoder_output=self.prenet(BN_feat)
-        encoder_output=self.speaker_condition_layer(encoder_output,seq_length,speaker_id)
+        weight,vq_encoder_output=self.soft_vq(encoder_output)
+        encoder_output=self.speaker_condition_layer(vq_encoder_output,speaker_id)
         encoder_output=self.dim_reduction_layer(encoder_output)
         mel_outputs_mstep = self.decoder.inference(
             encoder_output)
+
 
         mel_outputs = mel_outputs_mstep.view(
             mel_outputs_mstep.size(0), -1, self.n_mel_channels)

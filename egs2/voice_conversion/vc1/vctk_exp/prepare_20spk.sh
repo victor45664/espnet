@@ -180,8 +180,11 @@ for corpus in $corpus_names;do
    #每个spk只提取10句作为dev集，其它的都用来训练
 	 ((spk_id++))
 done
-cat $data_dir/eval/wav.scp.tmp | sort -u > $data_dir/eval/wav.scp
+cat $data_dir/eval/wav.scp.tmp | sort -u > $data_dir/eval/wav_mel.scp
+awk '{print $1,"sox",$2,"-r 16000 -t wav - |"}' $data_dir/eval/wav_mel.scp > $data_dir/eval/wav.scp
+
 cat $data_dir/eval/wav.scp | awk '{print $1,$1}' > $data_dir/eval/utt2spk
+
 cp $data_dir/eval/utt2spk $data_dir/eval/spk2utt
 
 
