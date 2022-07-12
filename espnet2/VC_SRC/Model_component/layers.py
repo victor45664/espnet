@@ -62,6 +62,23 @@ class ConvNorm(torch.nn.Module):
     def forward(self, signal):
         conv_signal = self.conv(signal)   #[B,2,T]
         return conv_signal
+        
+class attention_contition(torch.nn.Module):
+    def __init__(self, num_of_spk,dictionary_size, emb_dim):
+        super(attention_contition, self).__init__()
+        self.speaker_embedding = torch.nn.Embedding(num_of_spk, emb_dim*dictionary_size)
+        self.emb_dim=emb_dim
+        self.dictionary_size=dictionary_size
+
+    def forward(self, x,weight, speaker_id):
+        spkemb = self.speaker_embedding(speaker_id)
+
+
+        atten_spkemb = torch.matmul(weight, spkemb.view(-1, self.dictionary_size, self.emb_dim))
+        conditioned_x = torch.cat([x, atten_spkemb], dim=2)
+
+
+        return conditioned_x
 
 
 class concate_condition(torch.nn.Module):
