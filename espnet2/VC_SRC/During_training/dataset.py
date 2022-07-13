@@ -515,7 +515,7 @@ def group_length_sorting_collate_fn(batch_list):
 
 
 
-class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
+class  infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
                                                         #长度以dataset返回的第一个.shape[0]为准，参考group_length_sorting_collate_fn函数
     def __init__(self, dataset, batchsize, log_string=None, num_workers=4, batch_per_group=32,max_batchsize_mul_max_length=32*2000,min_batch_size=16):
                                                             # max_batchsize_mul_max_length是指batchsize*max_length的最大值，如果超过会自动减小batchsize，这是为了防止现存爆炸,这个不能太小，否则会出错
@@ -532,7 +532,9 @@ class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针�
                                               drop_last=False,
                                               collate_fn=group_length_sorting_collate_fn)
 
-        self.single_sample_dataloader_iter=iter(self.group_dataloader)
+        self.single_sample_dataloader_iter1=iter(self.group_dataloader)
+        self.single_sample_dataloader_iter2=iter(self.group_dataloader)
+        self.using_loader=1    #正在使用的loader
         self.epoch = 0
         self.loading_group=0
         self.residual_sample=[] #过长的序列，可能会被抛弃，因此攒起来
@@ -543,13 +545,23 @@ class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针�
 
 
     def next_group(self):
-        self.current_group = self.single_sample_dataloader_iter.next()
+        if self.using_loader == 1:
+            self.current_group = self.single_sample_dataloader_iter1.next()
+        else:
+            self.current_group = self.single_sample_dataloader_iter2.next()
+
         self.loading_sample = 0
 
         self.loading_group += 1
 
         if self.loading_group >= len(self.group_dataloader):
-            self.single_sample_dataloader_iter = iter(self.group_dataloader)
+            if self.using_loader == 1:
+                self.single_sample_dataloader_iter1 = iter(self.group_dataloader)
+                self.using_loader=2
+            else:
+                self.single_sample_dataloader_iter2 = iter(self.group_dataloader)
+                self.using_loader=1
+
             self.epoch = self.epoch + 1
             self.loading_group = 0
             if self.log_string!=None:
@@ -577,7 +589,6 @@ class   infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针�
         if self.loading_sample+self.min_batch_size > len(self.current_group):
             self.residual_sample.extend(self.current_group[self.loading_sample:])
             self.next_group()
-
 
 
         sp=self.loading_sample  #起始样品指针
