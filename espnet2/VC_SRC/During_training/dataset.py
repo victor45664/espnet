@@ -513,7 +513,7 @@ def group_length_sorting_collate_fn(batch_list):
 
 
 
-import time
+
 
 class  infinite_seqlength_optmized_dataloader(object):  # 这个dataloader针对序列不等长进行了优化，把长度相近的序列都聚到了一起
                                                         #长度以dataset返回的第一个.shape[0]为准，参考group_length_sorting_collate_fn函数
