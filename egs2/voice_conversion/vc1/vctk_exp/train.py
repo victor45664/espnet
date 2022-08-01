@@ -32,8 +32,9 @@ class loss_logger(object):
         for key in state.keys():
             if key!="hist":
                 self.log_writer.add_scalar(prefix+key, float(state[key]), step)
-        for key in state["hist"].keys():
-            self.log_writer.add_histogram(prefix+key, state["hist"][key], step)
+            else:
+                for key in state["hist"].keys():
+                    self.log_writer.add_histogram(prefix+key, state["hist"][key], step)
 
 logger=loss_logger(loggerdir)
 
