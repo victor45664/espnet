@@ -30,7 +30,7 @@ hparams.prenet_depths=[512,512,512]
 
 
 hparams.batchsize=64
-hparams.dictionary_size=32   #字典的大小
+hparams.dictionary_size=32   #字典的大小 16 64 128 256
 hparams.speaker_emb_dim=16   #spk embedding 的维度  dictionary_size*speaker_emb_dim 才是spk emb的真实维度
 
 
