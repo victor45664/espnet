@@ -40,10 +40,10 @@ logger=loss_logger(loggerdir)
 
 
 train_dataset=BNfeats_meltarget_spk_dataset(os.path.join(mynn.datadir,'train'), output_per_step=mynn.hparams.n_frames_per_step)
-train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=4,max_batchsize_mul_max_length=32*2000)
+train_loader=infinite_seqlength_optmized_dataloader(train_dataset,mynn.hparams.batchsize,'train_dataset',num_workers=6, batch_per_group=16,max_batchsize_mul_max_length=32*2000)
 
 test_dataset=BNfeats_meltarget_spk_dataset(os.path.join(mynn.datadir,'dev'), output_per_step=mynn.hparams.n_frames_per_step)
-test_loader=infinite_seqlength_optmized_dataloader(test_dataset,mynn.hparams.batchsize,num_workers=2,max_batchsize_mul_max_length=32*400)
+test_loader=infinite_seqlength_optmized_dataloader(test_dataset,mynn.hparams.batchsize, batch_per_group=16,num_workers=2,max_batchsize_mul_max_length=32*2000)
 
 mynn.hparams.BN_feat_dim=train_dataset.BN_feat_dim
 mynn.hparams.n_mel_channels=train_dataset.mel_target_dim
