@@ -3,10 +3,10 @@ from espnet2.VC_SRC.Model_component.Fastspeech2.default_param import fastspeech_
 from torch import nn
 import torch
 from espnet2.VC_SRC.Model_component.default_hparams_nonparallel import  create_hparams
-from espnet2.VC_SRC.Model_component.layers import Tacotron1_prenet,concate_condition
+from espnet2.VC_SRC.Model_component.layers import Tacotron1_prenet,attention_contition
 from espnet2.VC_SRC.Model_component.Fastspeech2.utils import get_mask_from_lengths
 from espnet2.VC_SRC.Model_component.Fastspeech2.Loss import FastSpeech2Loss
-
+import math
 hparams=create_hparams()
 
 
@@ -25,7 +25,8 @@ def getlr(step,warm_up_step=4000):
 #parameter override
 #model_config
 hparams.batchsize=64
-
+hparams.dictionary_size=32   #字典的大小
+hparams.speaker_emb_dim=16   #spk embedding 的维度  dictionary_size*speaker_emb_dim 才是spk emb的真实维度
 
 class FastSpeech2(nn.Module):
     """ FastSpeech2 """
@@ -63,6 +64,33 @@ class FastSpeech2(nn.Module):
 
 
 
+
+
+class SoftVQ(torch.nn.Module):
+
+
+    def __init__(self,dictionary_size,key_dim,dictionary_dim):
+        super(SoftVQ, self).__init__()
+
+
+        self.keys=torch.nn.Parameter(torch.randn((key_dim,dictionary_size)))         # key(dim,dictionary_size)
+        self.value=torch.nn.Parameter(torch.randn((dictionary_size,dictionary_dim)))         # key(dictionary_size,dim)
+        self.sqrt_d_k=math.sqrt(key_dim)
+
+    def forward(self,query,norm_weight=True):
+        # 利用query和key计算权重，使用dotproduct
+        # query(batch_size,length,dim)
+        if norm_weight:
+            weight=torch.matmul(query, self.keys)/self.sqrt_d_k
+        else:
+            weight = torch.matmul(query, self.keys)
+        weight = torch.softmax(weight,dim=2)
+                                                    # weight(batch,length,dictionary_size)
+        VQed_output = torch.matmul(weight, self.value)  #
+
+        return weight,VQed_output
+
+
 class VC_model(nn.Module):
     def __init__(self, hparams):
         super(VC_model, self).__init__()
@@ -71,8 +99,8 @@ class VC_model(nn.Module):
         self.n_frames_per_step = hparams.n_frames_per_step
 
         self.prenet=Tacotron1_prenet(hparams.BN_feat_dim,[hparams.prenet_dim])
-
-        self.speaker_condition_layer=concate_condition(hparams.num_of_spk,hparams.speaker_emb_dim)
+        self.soft_vq = SoftVQ(hparams.dictionary_size, hparams.prenet_dim, hparams.prenet_dim)
+        self.speaker_condition_layer=attention_contition(hparams.num_of_spk,hparams.dictionary_size,hparams.speaker_emb_dim)
 
         self.dim_reduction_layer=torch.nn.Linear(hparams.prenet_dim+hparams.speaker_emb_dim,fastspeech_model_config["transformer"]["decoder_hidden"], bias=True)
 
@@ -85,7 +113,8 @@ class VC_model(nn.Module):
     def forward(self, BN_feat,seq_length,speaker_id,mel_target):
 
         encoder_output=self.prenet(BN_feat)
-        encoder_output=self.speaker_condition_layer(encoder_output,speaker_id)
+        weight, vq_encoder_output = self.soft_vq(encoder_output)
+        encoder_output=self.speaker_condition_layer(vq_encoder_output,weight,speaker_id)
 
         encoder_output=self.dim_reduction_layer(encoder_output)
 
@@ -107,7 +136,8 @@ class VC_model(nn.Module):
     def inference(self, BN_feat,seq_length,speaker_id):
 
         encoder_output=self.prenet(BN_feat)
-        encoder_output=self.speaker_condition_layer(encoder_output,speaker_id)
+        weight, vq_encoder_output = self.soft_vq(encoder_output)
+        encoder_output=self.speaker_condition_layer(vq_encoder_output,weight,speaker_id)
 
         encoder_output=self.dim_reduction_layer(encoder_output)
 
