@@ -10,7 +10,9 @@ import math
 hparams=create_hparams()
 
 
-datadir='/home/projects/12001458/yufei/espnet/egs2/voice_conversion/vc1/vctk_exp/data_20spk'
+# datadir='/home/projects/12001458/yufei/espnet/egs2/voice_conversion/vc1/vctk_exp/data_20spk'
+datadir='/home/zengzhiping/w2022/espnet/egs2/voice_conversion/vc1/vctk_exp/data_20spk_hifigan'
+
 optimizer=torch.optim.Adam
 def getlr(step,warm_up_step=4000):
     init_lr = np.power(fastspeech_model_config["transformer"]["decoder_hidden"], -0.5)
