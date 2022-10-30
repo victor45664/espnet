@@ -89,6 +89,7 @@ def log(
 
 
 def get_mask_from_lengths(lengths, max_len=None):
+    lengths=lengths.int()
     batch_size = lengths.shape[0]
     if max_len is None:
         max_len = torch.max(lengths).item()

@@ -6,7 +6,7 @@ from espnet2.VC_SRC.Model_component.default_hparams_nonparallel import  create_h
 from espnet2.VC_SRC.Model_component.layers import Tacotron1_prenet,concate_condition
 from espnet2.VC_SRC.Model_component.Fastspeech2.utils import get_mask_from_lengths
 from espnet2.VC_SRC.Model_component.Fastspeech2.Loss import FastSpeech2Loss
-
+import numpy as np
 hparams=create_hparams()
 
 

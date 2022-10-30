@@ -7,6 +7,7 @@ from espnet2.VC_SRC.Model_component.layers import Tacotron1_prenet,attention_con
 from espnet2.VC_SRC.Model_component.Fastspeech2.utils import get_mask_from_lengths
 from espnet2.VC_SRC.Model_component.Fastspeech2.Loss import FastSpeech2Loss
 import math
+import numpy as np
 hparams=create_hparams()
 
 
